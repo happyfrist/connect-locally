@@ -100,7 +100,7 @@ export default function Life() {
     try {
       const { snapdom } = await import("@zumer/snapdom");
       const result = await snapdom(cardRef.current, { scale: 2 });
-      await result.download({ format: "png", filename: "saanjh-memory.png" });
+      await result.download({ format: "png", filename: "connectmaxxing-memory.png" });
       toast.success("Card saved. You decide where it goes next.");
     } catch (error) {
       toast.error("Could not generate the image in this browser.");
@@ -410,7 +410,7 @@ export default function Life() {
                       <span className="relative inline-flex size-7 items-center justify-center overflow-hidden rounded-full bg-[oklch(0.83_0.11_82)]">
                         <span className="absolute left-1/2 top-1/2 size-3.5 -translate-x-1/2 -translate-y-[60%] rounded-full bg-[oklch(0.62_0.12_45)]" />
                       </span>
-                      <span className="font-display text-lg">saanjh</span>
+                      <span className="font-display text-lg">connectmaxxing</span>
                       <span className="ml-auto text-[9px] uppercase tracking-[0.16em] text-white/50">
                         a shared experience
                       </span>
@@ -449,7 +449,7 @@ export default function Life() {
           <div className="flex items-start gap-2 rounded-lg bg-muted/60 px-3 py-2 text-[11px] leading-5 text-muted-foreground">
             <ImageIcon className="mt-0.5 size-3.5 shrink-0" />
             Photo uploads aren't part of v1, so cards contain only your own words and
-            activity facts. Nothing is posted anywhere by Saanjh.
+            activity facts. Nothing is posted anywhere by Connectmaxxing.
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row">

@@ -98,7 +98,7 @@ export const completeOnboarding = mutation({
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
     if (!args.confirmedAdult) {
-      throw new Error("Saanjh is an 18+ space. Confirm your age to continue.");
+      throw new Error("Connectmaxxing is an 18+ space. Confirm your age to continue.");
     }
     const clean = validateProfileInput(args);
     const existing = await getMyProfile(ctx);
@@ -161,7 +161,7 @@ export const byUser = query({
 });
 
 /**
- * Deletes everything Saanjh stores about the member. The sign-in identity row
+ * Deletes everything Connectmaxxing stores about the member. The sign-in identity row
  * is scrubbed rather than removed so Convex Auth sessions are revoked on the
  * next request; the limitation is documented in PRIVACY.md.
  */

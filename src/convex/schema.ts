@@ -89,7 +89,7 @@ const schema = defineSchema(
       role: v.optional(roleValidator), // role of the user. do not remove
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
-    // Everything below belongs to the Saanjh product.
+    // Everything below belongs to the Connectmaxxing product.
     profiles: defineTable({
       userId: v.id("users"),
       displayName: v.string(),

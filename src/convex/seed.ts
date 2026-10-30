@@ -23,7 +23,7 @@ type DemoPersonSeed = {
 
 function demoEmail(key: string, city: string) {
   const slug = city.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  return `demo.${slug}.${key}@saanjh.example`;
+  return `demo.${slug}.${key}@connectmaxxing.example`;
 }
 
 function nextWeekday(day: number, hour: number, minute = 0) {

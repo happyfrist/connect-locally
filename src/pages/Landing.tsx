@@ -44,7 +44,7 @@ function Nav() {
         <Link to="/" className="flex items-center gap-2.5">
           <Mark />
           <span className="font-display text-xl tracking-tight text-foreground">
-            saanjh
+            connectmaxxing
           </span>
         </Link>
         <nav className="ml-auto hidden items-center gap-7 text-sm text-muted-foreground md:flex">
@@ -261,7 +261,7 @@ export default function Landing() {
                 transition={{ duration: 0.6, delay: 0.16 }}
                 className="mt-6 max-w-lg text-[15px] leading-7 text-muted-foreground"
               >
-                Saanjh helps you find people who want the same real-world things
+                Connectmaxxing helps you find people who want the same real-world things
                 you do — a running partner, a study table, a film, a walk after
                 work. It's a bridge out of the app, not another place to live
                 inside one.
@@ -556,7 +556,7 @@ export default function Landing() {
           <div className="mx-auto max-w-4xl px-5 py-16 text-center">
             <Sparkles className="mx-auto size-5 text-primary" />
             <blockquote className="mt-5 font-display text-2xl leading-snug text-foreground sm:text-3xl">
-              “A successful member might eventually stop needing Saanjh to make
+              “A successful member might eventually stop needing Connectmaxxing to make
               plans with their friends. That's a successful outcome, not
               churn.”
             </blockquote>
@@ -633,7 +633,7 @@ export default function Landing() {
           <div className="flex items-center gap-2.5">
             <Mark />
             <div>
-              <p className="font-display text-lg leading-none">saanjh</p>
+              <p className="font-display text-lg leading-none">connectmaxxing</p>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 Less scrolling. More shared life.
               </p>
@@ -655,7 +655,7 @@ export default function Landing() {
           </div>
         </div>
         <div className="mx-auto w-full max-w-6xl border-t border-border/70 px-5 py-4 text-[11px] leading-5 text-muted-foreground">
-          Saanjh is an 18+ platonic friendship product. This prototype has not
+          Connectmaxxing is an 18+ platonic friendship product. This prototype has not
           completed legal review, identity verification or a real-world safety
           operation. Please don't use it to meet strangers yet.
         </div>

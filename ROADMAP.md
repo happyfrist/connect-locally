@@ -44,7 +44,7 @@ These are launch blockers, not stretch goals.
 ## Open decisions
 
 - Launch city and initial segment.
-- Product name and trademark check ("Saanjh" is a working name).
+- Trademark and name-clearance check for "Connectmaxxing" before any public launch.
 - Licence and contribution model.
 - Whether identity verification is proportionate, and which provider.
 - Moderation staffing model and funding.

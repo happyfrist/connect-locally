@@ -1,6 +1,6 @@
 # Security
 
-Saanjh handles real-world meeting coordination. Security and safety reports are taken seriously even though this is a prototype.
+Connectmaxxing handles real-world meeting coordination. Security and safety reports are taken seriously even though this is a prototype.
 
 ## Reporting a vulnerability
 

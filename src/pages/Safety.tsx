@@ -49,7 +49,7 @@ export default function Safety() {
     )[0] ?? null;
 
   const safetyPlanText = nextPlan
-    ? `Safety plan for a Saanjh meetup\n\nWhat: ${nextPlan.activity.title}\nWhen: ${formatWhen(nextPlan.activity.startsAt)} (about ${nextPlan.activity.durationMins} min)\nWhere: ${nextPlan.activity.venue}, ${nextPlan.activity.area}\nHost: ${nextPlan.host?.displayName ?? "the host"}\n\nI'll message you when I arrive and when I'm leaving. Saanjh does not track my location. If I don't check in by the end time, call me.`
+    ? `Safety plan for a Connectmaxxing meetup\n\nWhat: ${nextPlan.activity.title}\nWhen: ${formatWhen(nextPlan.activity.startsAt)} (about ${nextPlan.activity.durationMins} min)\nWhere: ${nextPlan.activity.venue}, ${nextPlan.activity.area}\nHost: ${nextPlan.host?.displayName ?? "the host"}\n\nI'll message you when I arrive and when I'm leaving. Connectmaxxing does not track my location. If I don't check in by the end time, call me.`
     : "";
 
   const copyPlan = async () => {
@@ -70,7 +70,7 @@ export default function Safety() {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = "saanjh-my-data.json";
+    anchor.download = "connectmaxxing-my-data.json";
     anchor.click();
     URL.revokeObjectURL(url);
     toast.success("Export downloaded.");
@@ -123,8 +123,8 @@ export default function Safety() {
             <h2 className="font-display text-xl">If you need help now</h2>
           </div>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            Saanjh cannot send help. In India, call 112 for police, fire or
-            ambulance. These are public emergency numbers, not a Saanjh service.
+            Connectmaxxing cannot send help. In India, call 112 for police, fire or
+            ambulance. These are public emergency numbers, not a Connectmaxxing service.
           </p>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {[
@@ -179,7 +179,7 @@ export default function Safety() {
           <div>
             <h2 className="font-display text-xl">Share a safety plan</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              Saanjh doesn't store a trusted contact. Copy the plan and send it
+              Connectmaxxing doesn't store a trusted contact. Copy the plan and send it
               yourself, or open your messaging app.
             </p>
           </div>
@@ -295,7 +295,7 @@ export default function Safety() {
           <h2 className="font-display text-xl">Your data</h2>
         </div>
         <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
-          Saanjh stores your profile, plans, requests, check-ins, private reconnect
+          Connectmaxxing stores your profile, plans, requests, check-ins, private reconnect
           answers, journal entries and reports. It does not store exact home
           coordinates, background location, identity documents, contacts or payment
           details. Export or delete below.

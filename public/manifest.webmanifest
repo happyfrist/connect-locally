@@ -1,7 +1,7 @@
 {
-  "name": "freebuff.com application",
-  "short_name": "freebuff.com",
-  "description": "freebuff.com application",
+  "name": "Connectmaxxing",
+  "short_name": "Connectmaxxing",
+  "description": "Less scrolling. More shared life. An 18+ platonic friendship app.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

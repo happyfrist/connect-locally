@@ -301,7 +301,7 @@ export default function Create() {
                 className="mt-1.5"
               />
               <p className="mt-1 text-[11px] text-muted-foreground">
-                No payment is collected through Saanjh.
+                No payment is collected through Connectmaxxing.
               </p>
             </div>
             <div>
@@ -630,7 +630,7 @@ export default function Create() {
 
       <p className="mt-4 flex items-center gap-2 text-[11px] text-muted-foreground">
         <Checkbox checked disabled className="size-3" /> Plans and circles appear in
-        your city only. Nothing is broadcast outside Saanjh.
+        your city only. Nothing is broadcast outside Connectmaxxing.
       </p>
 
       {myCircles.length > 0 ? (

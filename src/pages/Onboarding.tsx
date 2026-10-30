@@ -154,7 +154,7 @@ export default function Onboarding() {
           console.warn("Demo seed skipped", error);
         }
       }
-      toast.success(isEditing ? "Profile updated" : "You're in. Welcome to Saanjh.");
+      toast.success(isEditing ? "Profile updated" : "You're in. Welcome to Connectmaxxing.");
       navigate("/discover");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save your profile.");
@@ -172,7 +172,7 @@ export default function Onboarding() {
             <span className="relative inline-flex size-8 items-center justify-center overflow-hidden rounded-full bg-primary">
               <span className="absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-[60%] rounded-full bg-[oklch(0.94_0.1_90)]" />
             </span>
-            <span className="font-display text-xl">saanjh</span>
+            <span className="font-display text-xl">connectmaxxing</span>
           </Link>
           {profile ? (
             <Button variant="ghost" size="sm" asChild>
@@ -261,7 +261,7 @@ export default function Onboarding() {
                     I'm 18 or older
                   </span>
                   <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
-                    Saanjh is an adult-only space. This is a self-declaration, not
+                    Connectmaxxing is an adult-only space. This is a self-declaration, not
                     identity verification — we say so honestly.
                   </span>
                 </span>
@@ -618,7 +618,7 @@ export default function Onboarding() {
         </div>
 
         <p className="mt-5 text-center text-xs leading-5 text-muted-foreground">
-          Saanjh is 18+. Your exact address, phone number and email are never
+          Connectmaxxing is 18+. Your exact address, phone number and email are never
           shared with other members.
         </p>
       </div>

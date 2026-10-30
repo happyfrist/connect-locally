@@ -111,7 +111,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
           >
             <span className="absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-[60%] rounded-full bg-[oklch(0.94_0.1_90)]" />
           </span>
-          <span className="font-display text-xl">saanjh</span>
+          <span className="font-display text-xl">connectmaxxing</span>
         </Link>
         <Link
           to="/"
@@ -294,7 +294,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
           </Card>
 
           <p className="mt-4 text-center text-[11px] leading-5 text-muted-foreground">
-            By continuing you confirm you're 18 or older. Saanjh is a friendship
+            By continuing you confirm you're 18 or older. Connectmaxxing is a friendship
             product, not a dating app.
           </p>
         </div>

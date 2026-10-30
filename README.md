@@ -1,8 +1,8 @@
-# Saanjh
+# Connectmaxxing
 
 **Less scrolling. More shared life.**
 
-Saanjh is a working prototype of an 18+, platonic, real-world friendship platform for India. It is built around a single loop: discover a small plan, ask to join, meet in a public place, and privately decide whether you'd like to see each other again.
+Connectmaxxing is a working prototype of an 18+, platonic, real-world friendship platform for India. It is built around a single loop: discover a small plan, ask to join, meet in a public place, and privately decide whether you'd like to see each other again.
 
 It is deliberately **not** a dating app, a feed, a follower graph or a paid-visibility product.
 
@@ -86,7 +86,7 @@ To test the *real* host-approval and mutual-reconnect rules rather than the demo
 
 ## Privacy in one paragraph
 
-Saanjh stores only what the flow needs: display name, city, neighbourhood, optional bio, languages, interests, preferences, plans, requests, check-ins, private reconnect answers, journal entries and reports. It never asks for an exact address, phone number, identity document, contacts or background location. A one-sided reconnect answer is never returned to the other person, and is deleted if either person blocks the other. There is no third-party analytics, advertising or payment integration in this version. Details and retention limits: [PRIVACY.md](./PRIVACY.md).
+Connectmaxxing stores only what the flow needs: display name, city, neighbourhood, optional bio, languages, interests, preferences, plans, requests, check-ins, private reconnect answers, journal entries and reports. It never asks for an exact address, phone number, identity document, contacts or background location. A one-sided reconnect answer is never returned to the other person, and is deleted if either person blocks the other. There is no third-party analytics, advertising or payment integration in this version. Details and retention limits: [PRIVACY.md](./PRIVACY.md).
 
 ## Safety in one paragraph
 
@@ -94,7 +94,7 @@ Plans must use a public venue with a start and end time; join requests require h
 
 ## Licence
 
-No licence file is included yet. Recommendation: **AGPL-3.0** for a networked product, because it keeps modifications to a hosted Saanjh available to its users, while MIT/Apache-2.0 make more sense if the goal is maximum reuse of the domain layer. This is a founder decision; see [ROADMAP.md](./ROADMAP.md#open-decisions).
+No licence file is included yet. Recommendation: **AGPL-3.0** for a networked product, because it keeps modifications to a hosted Connectmaxxing available to its users, while MIT/Apache-2.0 make more sense if the goal is maximum reuse of the domain layer. This is a founder decision; see [ROADMAP.md](./ROADMAP.md#open-decisions).
 
 ## Documentation
 

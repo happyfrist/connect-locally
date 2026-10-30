@@ -49,7 +49,7 @@ function Brand() {
         <span className="absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-[60%] rounded-full bg-[oklch(0.94_0.1_90)]" />
         <span className="absolute bottom-2 left-1/2 h-px w-5 -translate-x-1/2 bg-white/70" />
       </span>
-      <span className="font-display text-xl tracking-tight">saanjh</span>
+      <span className="font-display text-xl tracking-tight">connectmaxxing</span>
     </Link>
   );
 }

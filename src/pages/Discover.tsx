@@ -412,7 +412,7 @@ export default function Discover() {
 
               <div className="flex items-start gap-2 rounded-xl bg-muted/60 p-3 text-[11px] leading-5 text-muted-foreground">
                 <MapPin className="mt-0.5 size-3.5 shrink-0" />
-                Saanjh doesn't offer direct messages between strangers. Meet through
+                Connectmaxxing doesn't offer direct messages between strangers. Meet through
                 a plan or a circle, then choose to reconnect after.
               </div>
 

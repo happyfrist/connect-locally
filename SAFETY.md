@@ -1,6 +1,6 @@
 # Safety
 
-Saanjh coordinates strangers meeting in physical locations. That is the highest-risk thing the product does, so this document separates **what is implemented** from **what is still missing**.
+Connectmaxxing coordinates strangers meeting in physical locations. That is the highest-risk thing the product does, so this document separates **what is implemented** from **what is still missing**.
 
 > This is a prototype. It is not safe to use with strangers yet. It has no identity verification, no emergency response, no staffed moderation team and no real-world pilot.
 
@@ -46,7 +46,7 @@ Saanjh coordinates strangers meeting in physical locations. That is the highest-
 | --- | --- |
 | Age or identity verification | Anyone can self-declare 18+. A proper provider and legal review are required. |
 | Host background checks | Hosts are unverified members, exactly as labelled. |
-| Emergency response | Saanjh cannot send help and does not contact anyone on your behalf. |
+| Emergency response | Connectmaxxing cannot send help and does not contact anyone on your behalf. |
 | Live location / check-in monitoring | No one is watching whether you arrive or leave. |
 | 24/7 moderation staffing | The queue exists; staffed coverage, SLAs and escalation do not. |
 | Automated retention/deletion | Data remains until a member deletes it; no scheduled purge exists. |
@@ -56,7 +56,7 @@ Saanjh coordinates strangers meeting in physical locations. That is the highest-
 
 ## 3. Emergency guidance
 
-In India: **112** for police, fire or ambulance; **100** police; **181** women's helpline; **1930** cyber-fraud reporting. Verify current numbers locally before publishing. These are public services, not Saanjh features. The app shows a warning not to rely on it for emergency help.
+In India: **112** for police, fire or ambulance; **100** police; **181** women's helpline; **1930** cyber-fraud reporting. Verify current numbers locally before publishing. These are public services, not Connectmaxxing features. The app shows a warning not to rely on it for emergency help.
 
 ## 4. Host accountability (current)
 

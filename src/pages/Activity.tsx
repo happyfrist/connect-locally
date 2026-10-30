@@ -657,8 +657,8 @@ export default function Activity() {
               <p className="flex items-start gap-2">
                 <Ticket className="mt-0.5 size-3.5 shrink-0 text-primary" />
                 {activity.cost === 0
-                  ? "No payment is collected in Saanjh."
-                  : "Cost is paid directly at the venue. No payment is collected in Saanjh."}
+                  ? "No payment is collected in Connectmaxxing."
+                  : "Cost is paid directly at the venue. No payment is collected in Connectmaxxing."}
               </p>
             </div>
           </div>
