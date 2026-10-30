@@ -14,7 +14,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { CATEGORY_MAP, RECONNECT_LABELS } from "@/convex/lib/catalog";
+import { RECONNECT_LABELS } from "@/convex/lib/catalog";
+import { checkInState } from "@/convex/lib/policy";
 import {
   formatDay,
   formatDuration,
@@ -75,6 +76,7 @@ export default function Activity() {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [blockOpen, setBlockOpen] = useState(false);
+  const [now] = useState(() => Date.now());
 
   if (detail === undefined) {
     return (
@@ -98,12 +100,10 @@ export default function Activity() {
   }
 
   const { activity, host, isHost, participants, reconnectCandidates } = detail;
-  const category = CATEGORY_MAP[activity.category];
-  const started = activity.startsAt <= Date.now();
+  const started = activity.startsAt <= now;
+  const checkIn = checkInState(activity.startsAt, activity.durationMins, now);
   const cancelled = activity.status === "cancelled";
   const spotsLeft = activity.maxParticipants - participants.length;
-  const canAttend =
-    (isHost || detail.myRequestStatus === "approved") && started && !cancelled;
 
   const doRequest = async () => {
     setBusy("join");
@@ -583,20 +583,7 @@ export default function Activity() {
                 <p className="rounded-lg bg-secondary/60 px-3 py-2 text-center text-xs font-medium text-secondary-foreground">
                   You're hosting this plan
                 </p>
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setCancelOpen(true)}
-                >
-                  Cancel this plan
-                </Button>
-              </div>
-            ) : detail.myRequestStatus === "approved" ? (
-              <div className="mt-4 space-y-2">
-                <p className="flex items-center justify-center gap-1.5 rounded-lg bg-secondary/70 px-3 py-2 text-xs font-medium text-secondary-foreground">
-                  <Check className="size-3.5" /> You're on the list
-                </p>
-                {started ? (
+                {checkIn === "open" ? (
                   detail.hasAttended ? (
                     <p className="rounded-lg bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
                       Checked in. Journal entry saved privately.
@@ -617,7 +604,48 @@ export default function Activity() {
                   )
                 ) : (
                   <p className="rounded-lg bg-muted px-3 py-2 text-center text-[11px] text-muted-foreground">
-                    Check-in opens when the plan starts ({formatTime(activity.startsAt)}).
+                    {checkIn === "before"
+                      ? "Check-in opens 30 minutes before the plan."
+                      : "The check-in window has closed."}
+                  </p>
+                )}
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => setCancelOpen(true)}
+                >
+                  Cancel this plan
+                </Button>
+              </div>
+            ) : detail.myRequestStatus === "approved" ? (
+              <div className="mt-4 space-y-2">
+                <p className="flex items-center justify-center gap-1.5 rounded-lg bg-secondary/70 px-3 py-2 text-xs font-medium text-secondary-foreground">
+                  <Check className="size-3.5" /> You're on the list
+                </p>
+                {checkIn === "open" ? (
+                  detail.hasAttended ? (
+                    <p className="rounded-lg bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
+                      Checked in. Journal entry saved privately.
+                    </p>
+                  ) : (
+                    <Button
+                      className="w-full gap-2"
+                      onClick={doAttend}
+                      disabled={busy === "attend"}
+                    >
+                      {busy === "attend" ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <BadgeCheck className="size-4" />
+                      )}
+                      I was there — check in
+                    </Button>
+                  )
+                ) : (
+                  <p className="rounded-lg bg-muted px-3 py-2 text-center text-[11px] text-muted-foreground">
+                    {checkIn === "before"
+                      ? `Check-in opens 30 minutes before ${formatTime(activity.startsAt)}.`
+                      : "The check-in window closed 24 hours after the plan ended."}
                   </p>
                 )}
                 <Button variant="ghost" className="w-full" onClick={doWithdraw} disabled={busy === "withdraw"}>

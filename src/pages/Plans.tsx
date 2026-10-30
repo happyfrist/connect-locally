@@ -13,6 +13,7 @@ type Tab = "upcoming" | "hosting" | "past";
 export default function Plans() {
   const plans = useQuery(api.activities.myPlans);
   const [tab, setTab] = useState<Tab>("upcoming");
+  const [now] = useState(() => Date.now());
 
   if (plans === undefined) {
     return (
@@ -30,15 +31,12 @@ export default function Plans() {
   const sortByStart = <T extends { activity: { startsAt: number } }>(rows: T[]) =>
     [...rows].sort((a, b) => a.activity.startsAt - b.activity.startsAt);
 
-  const upcoming = sortByStart<any>([...plans.upcoming, ...plans.hosting]);
+  const upcoming = sortByStart([...plans.upcoming, ...plans.hosting]);
   const past = [...plans.past, ...plans.hostingPast].sort(
-    (a: any, b: any) => b.activity.startsAt - a.activity.startsAt,
+    (a, b) => b.activity.startsAt - a.activity.startsAt,
   );
-  const hosting = sortByStart<any>(plans.hosting);
-  const pendingTotal = hosting.reduce(
-    (sum: number, row: any) => sum + row.pendingCount,
-    0,
-  );
+  const hosting = sortByStart(plans.hosting);
+  const pendingTotal = hosting.reduce((sum, row) => sum + row.pendingCount, 0);
 
   const rows = tab === "upcoming" ? upcoming : tab === "hosting" ? hosting : past;
 
@@ -144,7 +142,7 @@ export default function Plans() {
         </div>
       ) : (
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          {rows.map((row: any) => (
+          {rows.map((row) => (
             <div key={row.activity._id}>
               <ActivityCard data={row} />
               {row.pendingCount > 0 ? (
@@ -157,7 +155,7 @@ export default function Plans() {
                   </span>
                   <span>Review →</span>
                 </Link>
-              ) : row.myStatus === "approved" && !row.attended && row.activity.startsAt < Date.now() ? (
+              ) : row.myStatus === "approved" && !row.attended && row.activity.startsAt < now ? (
                 <Link
                   to={`/activity/${row.activity._id}`}
                   className="mt-2 flex items-center justify-between rounded-xl border border-border bg-card px-3 py-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"

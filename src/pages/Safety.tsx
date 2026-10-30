@@ -8,7 +8,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { useAuth } from "@/hooks/use-auth";
 import { formatWhen, timeAgo } from "@/lib/format";
 import { useMutation, useQuery } from "convex/react";
@@ -79,7 +81,7 @@ export default function Safety() {
   const doUnblock = async (userId: string) => {
     setUnblocking(userId);
     try {
-      await unblock({ userId: userId as any });
+      await unblock({ userId: userId as Id<"users"> });
       toast.success("Unblocked.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not unblock.");
@@ -92,7 +94,13 @@ export default function Safety() {
     setDeleting(true);
     try {
       await deleteMyData({});
-      await signOut();
+      // The server has already revoked the auth identity and sessions; clear the
+      // local client state even if the auth client cannot complete sign-out.
+      try {
+        await signOut();
+      } catch {
+        // Access is revoked server-side regardless.
+      }
       window.location.href = "/";
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not delete your data.");
@@ -255,8 +263,8 @@ export default function Safety() {
             <h2 className="font-display text-xl">Blocked members</h2>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            Blocking hides plans, circles and profiles both ways and deletes pending
-            private reconnect answers.
+            Blocking hides plans, circles and profiles both ways, ends an existing
+            connection, and deletes pending private reconnect answers.
           </p>
           {blocked === undefined ? null : blocked.length === 0 ? (
             <p className="mt-3 rounded-xl bg-muted/50 px-4 py-3 text-xs text-muted-foreground">
@@ -314,10 +322,12 @@ export default function Safety() {
           </Button>
         </div>
         <p className="mt-3 text-[10px] leading-4 text-muted-foreground">
-          Deletion removes your profile, plans, requests, check-ins, journal, private
-          answers, blocks and reports. The sign-in identity row is scrubbed rather
-          than erased so an active session can't keep writing data — see PRIVACY.md
-          for this limitation.
+          Deletion revokes every sign-in session and provider identity, then removes
+          your profile, hosted plans and circles, requests, check-ins, journal,
+          connections, blocks and private reconnect answers in resumable batches.
+          Open and closed moderation reports and audit entries are retained as an
+          unidentified safety record; the member row becomes a tombstone with no
+          email. See PRIVACY.md for the retention policy.
         </p>
       </section>
 
@@ -327,7 +337,7 @@ export default function Safety() {
           <li>· Identity or age verification (the 18+ check is self-declared)</li>
           <li>· Government ID (Aadhaar or otherwise) collection — deliberately absent</li>
           <li>· Emergency response, live location tracking or supervision</li>
-          <li>· A staffed 24/7 moderation team; reports are queued for a human reviewer</li>
+          <li>· A staffed moderation team or 24/7 coverage; this build has no on-call reviewers</li>
           <li>· Legal review of affinity-group eligibility and moderation policies</li>
           <li>· Verified host background checks or guarantees of any kind</li>
         </ul>
@@ -337,6 +347,66 @@ export default function Safety() {
           don't exist yet.
         </p>
       </section>
+
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          setDeleteOpen(open);
+          if (!open) setDeletePhrase("");
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete your account?</DialogTitle>
+            <DialogDescription>
+              This revokes every session and removes your product records. It
+              cannot be undone from inside the app.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm leading-6 text-muted-foreground">
+            <p>
+              Your profile, hosted plans and circles, requests, check-ins,
+              journal, connections, blocks and private reconnect answers are
+              removed in resumable batches.
+            </p>
+            <p className="rounded-xl bg-muted/60 px-3 py-2 text-xs">
+              Open and closed moderation reports and audit entries are retained
+              as an unidentified safety record. Your member row keeps no email
+              or role. See PRIVACY.md before continuing.
+            </p>
+            <label className="block text-xs font-medium text-foreground" htmlFor="delete-confirmation">
+              Type DELETE to confirm
+            </label>
+            <Input
+              id="delete-confirmation"
+              value={deletePhrase}
+              onChange={(event) => setDeletePhrase(event.target.value)}
+              autoComplete="off"
+              placeholder="DELETE"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteOpen(false);
+                setDeletePhrase("");
+              }}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={doDelete}
+              disabled={deletePhrase !== "DELETE" || deleting}
+            >
+              {deleting ? <Loader2 className="size-4 animate-spin" /> : null}
+              Delete permanently
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -87,7 +87,11 @@ export default function Discover() {
   const loadDemo = async () => {
     setSeeding(true);
     try {
-      await seed({});
+      const result = await seed({});
+      if (!result.enabled) {
+        toast.message("Demo content is disabled on this deployment.");
+        return;
+      }
       toast.success("Demo city added. Seeded members are labelled.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load demo content.");

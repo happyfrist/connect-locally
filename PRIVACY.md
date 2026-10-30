@@ -31,17 +31,18 @@ This document describes what the prototype stores, who can see it, and what stil
 ## 2. User controls
 
 - **Export:** Safety centre → *Export my data* downloads a JSON file containing the profile, requests, attendance, reconnect answers, connections, journal, circle memberships and reports made by the member.
-- **Delete:** Safety centre → *Delete my data* removes the profile, requests, attendance, private answers, connections, blocks, memberships, journal entries, reports they made, hosted plans, hosted circles and related participant rows, and scrubs the sign-in identity's name/email/image.
-- **Block/unblock:** from a plan or the safety centre.
+- **Delete:** Safety centre → *Delete my data* immediately revokes every Convex Auth session and provider identity, then removes the profile, hosted plans/circles and their participant rows, requests, attendance, private answers, connections, blocks, memberships and journal entries in bounded resumable batches. The member row becomes a tombstone with no email, image or role.
+- **Block/unblock:** from a plan or the safety centre. Blocking also ends an existing connection.
 - **Journal:** edit or delete any entry.
 - **Profile:** edit all profile fields from the shell.
 
-### Deletion limitations
+### Deletion behavior and retention exceptions
 
-- The Convex Auth identity row is **scrubbed, not deleted**, so an existing session cannot keep writing product data. The row may still exist with internal identifiers. Fully revoking auth sessions needs a server-side auth-admin operation and is not implemented.
-- Reports made **about** a member by other people are retained for safety review. They are not deleted by the member's own deletion, because they belong to another reporter and to the moderation record.
-- Backups and infrastructure-level copies are outside the app's control and have no documented retention yet.
-- No automated deletion scheduler exists. Deletion happens only when the member triggers it.
+- Sign-in sessions, refresh tokens, provider accounts and pending verification codes are deleted synchronously when deletion starts. An already-issued access token cannot use product functions because every function checks `accountStatus` and refuses `deleting`/`deleted` accounts.
+- Product records are removed by a scheduled, indexed, resumable job in small batches, so a large history does not need to fit in one database transaction. The job is idempotent and revokes auth again on each run.
+- **Retained:** moderation reports and the moderator audit log. These are kept as an unidentified safety record with the tombstone user id, not an email. Deleting them would destroy evidence needed for safety, legal or appeal processes. The retention period is **not yet legally reviewed or enforced**.
+- **Not deleted:** Convex Auth's internal rate-limit rows may retain an email identifier until the provider's own cleanup. Backups and infrastructure-level copies are outside the app's control and have no documented retention yet.
+- There is no automatic expiry deletion for inactive accounts; only member-initiated deletion exists.
 
 ## 3. Vendors and data flow
 
@@ -70,22 +71,31 @@ Primary sources to check: MeitY, the Gazette of India, PIB, and India Code. Do n
 
 ## 5. Security controls present
 
-- All product reads/writes require a signed-in member with a completed profile; admin operations require the `admin` role.
+- Every product read/write requires an active account and a completed profile. Disabled, deleting and deleted accounts are refused server-side.
+- Moderation requires the `moderator` or `admin` role. There is **no public moderator claim mutation**; roles are granted only through an internal owner/deployment procedure.
 - Authorization is enforced in Convex functions, not only in the UI.
+- One shared visibility policy hides blocked, hidden, disabled, deleting and deleted members across profiles, discovery, plans, circles and connections.
 - Public profile shapes are explicit allow-lists; email and moderation fields are never returned to other members.
-- Blocked pairs are rejected in every relevant function, including direct ID calls.
-- Reports cannot be read by the reported member.
+- Blocked pairs are rejected in every relevant function, including direct ID calls. Blocking ends a connection and deletes pending reconnect answers.
+- Check-in is limited to approved participants/hosts and a narrow window (30 minutes before start to 24 hours after the scheduled end). Reconnection is available only after a plan ends, for 14 days, and never for a cancelled plan.
+- Reports cannot be read by the reported member. Reasons are allow-listed, duplicates collapsed, and submissions throttled.
+- Mutations for profile writes, plans, joins, circles, reports, reconnection, check-in and moderator decisions have fixed-window rate limits.
+- Convex Auth applies its own sign-in rate limit (10 failed attempts/hour per identifier by default) and OTP expiry.
+- Demo seeding and demo reconnection consent are disabled unless `ALLOW_DEMO_SEED=true` is explicitly set on the deployment.
+- Anonymous guest accounts are refused by every product function unless `ALLOW_GUEST_DEMO=true`. They are not treated as verified members; production requires email OTP.
 - No service-role key, database password or provider secret exists in client code.
 - Convex environment variables (email gateway key) are read server-side only.
 - Input lengths, enum values, future dates, capacity and status transitions are validated server-side.
 
 ### Known security gaps
 
-- No rate limiting on reports, join requests or sign-in attempts beyond Convex Auth's built-in behaviour.
+- Query-level discovery throttling is not implemented; Convex queries cannot write rate-limit counters. Platform-level abuse controls and monitoring are still required.
+- The app-level throttles are fixed-window counters, not a distributed WAF or bot-detection system. There is no CAPTCHA, device attestation or IP reputation.
 - No CSRF-specific analysis (Convex RPC uses authenticated websockets; still needs review).
-- No independent penetration test, dependency audit or secret scanning in CI.
-- No content moderation for free-text fields beyond length limits.
-- Moderator bootstrap via self-service is prototype-only.
+- No independent penetration test, dependency audit, secret scanning or CI pipeline yet. `convex-test` authorization tests exist, but they are not a penetration test.
+- No automated content moderation for free-text fields beyond length limits and report review.
+- No age or identity verification. Email OTP proves control of an inbox, not a person or age.
+- No staffed moderation team, appeal process, grievance officer or emergency response.
 - No email verification requirement beyond the OTP itself.
 
 ## 6. Breach response (draft, not operational)

@@ -15,7 +15,8 @@ src/
     schema.ts            all tables, indexes and enums
     lib/
       catalog.ts         shared activity/interests vocabulary (client-safe)
-      auth.ts            identity, profile gate, block checks, allow-listed public shape
+      auth.ts            identity, account status, visibility/block policy, rate limits, allow-listed shape
+      policy.ts          pure check-in/reconnect windows and environment gates
       matching.ts        deterministic scoring + explanations
     profiles.ts          onboarding, public profile, export, deletion
     activities.ts        discover, detail, create/edit/cancel, requests, attendance, updates, plans
@@ -24,8 +25,9 @@ src/
     circles.ts           circles, pods, conversation circles, membership, posts, plans
     journal.ts           private journal, stats, computed milestones
     safety.ts            blocking, reports, reporter view
-    moderation.ts        moderator bootstrap, queue, decisions, audit log
-    seed.ts              idempotent demo city
+    moderation.ts        owner-only roles, queue, decisions, audit log
+    config.ts            public deployment capability flags
+    seed.ts              opt-in idempotent demo city
 ```
 
 ### Why not Expo + Supabase?
@@ -44,7 +46,7 @@ The domain model and permission rules translate directly to Postgres + RLS if a 
 
 | Table | Purpose | Notable constraints |
 | --- | --- | --- |
-| `users` | Convex Auth identity + `role` (`admin`/`member`) | email indexed by auth; never returned to other members |
+| `users` | Convex Auth identity + `role` (`admin`/`moderator`/`member`) + `accountStatus` | email indexed by auth; never returned to other members; deleted rows are unidentified tombstones |
 | `profiles` | Public-facing member profile and preferences | `by_user` unique in practice; `isDemo`, `hidden` |
 | `activities` | Hosted plans and open invitations | `status`, `startsAt`, `maxParticipants`, `autoApprove` (demo only), `isDemo` |
 | `joinRequests` | Join intent + host decision | `by_activity_user`; one row per member per plan |
@@ -55,17 +57,19 @@ The domain model and permission rules translate directly to Postgres + RLS if a 
 | `reports` | Safety reports + moderator outcome | reporter-only index; status enum |
 | `circles` | Community, pod or conversation circle | `kind`, `joinPolicy`, `maxMembers`, `prompts` |
 | `circleMembers` | Membership + pending requests | `by_circle_user`; host role |
-| `circlePosts` | Circle discussion/announcement | members-only read in `circles.get` |
+| `circlePosts` | Circle discussion/announcement | members-only read in `circles.get`; blocked/hidden authors filtered |
 | `activityUpdates` | Host announcements | visible with the plan |
 | `journalEntries` | Private memory per attended plan | `by_user_activity`; `isDemo` for the sample |
-| `auditLog` | Moderator and bootstrap actions | append-only through functions |
+| `auditLog` | Moderator/owner actions | append-only through functions; optional actor for system procedures |
+| `rateLimits` | Fixed-window mutation throttles | one bucket per action/member/window |
+| `accountDeletions` | Resumable erasure jobs | indexed by member/status; tombstone retained |
 | `demoSeed` | Idempotency markers | content per city, history per member |
 
 All timestamps are stored as epoch milliseconds. No table stores exact coordinates, phone numbers, messages or identity documents. There is intentionally no direct-message table yet.
 
 ## 3. Authorization model
 
-Every public function starts with `requireProfile(ctx)` (a valid signed-in user with a completed profile) or `requireAdmin(ctx)`. There is no unauthenticated read path except Convex Auth's own endpoints.
+Every product function starts with `requireProfile(ctx)` (an active, non-anonymous account with a completed profile) or `requireModerator(ctx)`. There is no unauthenticated product read path except the public capability flags in `config.appConfig`. Disabled, deleting and deleted accounts are refused even if an old access JWT is still valid.
 
 | Operation | Rule |
 | --- | --- |
@@ -75,21 +79,21 @@ Every public function starts with `requireProfile(ctx)` (a valid signed-in user 
 | Approve/decline | Host of that plan only; request must be pending; approval re-checks capacity transactionally. |
 | Withdraw | Request owner only. |
 | Post update / cancel | Host only. Cancelling declines pending requests and sets a reason. |
-| Check in | Host or approved participant; only after start time. Creates one journal entry, idempotently. |
-| Read reconnect candidates | Only if the viewer checked in; candidates are the host plus checked-in attendees. |
-| Submit reconnect decision | Both parties must be attendees; blocked pairs rejected; answer upserted privately. |
+| Check in | Host or approved participant; from 30 minutes before start to 24 hours after scheduled end; cancelled plans rejected. Creates one journal entry, idempotently. |
+| Read reconnect candidates | Only after the plan ends and only if the viewer checked in; candidates are the host plus checked-in attendees, filtered by block/visibility. |
+| Submit reconnect decision | Plan must have ended within 14 days and not be cancelled; both parties must be attendees; blocked pairs rejected; answer upserted privately. |
 | Create connection | Only inside `reconnect.decide` when both directions are `yes`. Never through a public mutation. |
 | Connections list | Only rows where the caller is `userA` or `userB`, with blocks filtered. |
-| Circle read | Signed in; host blocked check. Discussion posts and pending members are returned only to approved members/host. |
+| Circle read | Signed in; host visible and not blocked. Discussion posts, members and pending members are filtered by block/hidden/account status; posts/pending only for approved members/host. |
 | Circle join | Capacity and block checks; `open` approves immediately, `request` creates a pending membership. |
 | Circle approve | Host only, pending row only, capacity re-checked. |
 | Circle post | Approved member; announcements host-only. |
-| Report | Signed in; target existence validated; duplicates with an open report are collapsed. |
-| Moderator queue/resolve | `role === "admin"` only; decisions write `auditLog`. |
-| Data export | Caller's own rows only. |
-| Data deletion | Caller's own rows, their hosted plans/circles, related participant rows, and decisions about them. |
+| Report | Active member; target existence validated; reason allow-listed; throttled; duplicates with an open report collapsed. |
+| Moderator queue/resolve | `role === "moderator"` or `"admin"`; owner-only provisioning; decisions write `auditLog`. |
+| Data export | Caller's own rows only; other people's private answers are never included. |
+| Data deletion | Synchronous auth revocation, then resumable batched removal of the caller's rows, hosted content and decisions about them; moderation reports/audit retained. |
 
-Blocks are checked in discovery, people suggestions, plan detail, join requests, circle listing/joining, reconnect and connection listings. Because blocked users can call functions directly with known IDs, the checks live inside the functions, not only in the UI.
+Blocks are checked in discovery, people suggestions, plan detail, join requests, circle listing/joining, reconnect and connection listings. Because blocked users can call functions directly with known IDs, the checks live inside the functions, not only in the UI. A single `getVisibleProfile` helper is the source of truth for hidden/blocked/active-account visibility.
 
 ## 4. Matching
 
@@ -111,16 +115,16 @@ Weights are a product hypothesis, not a scientific claim. Change them in one fil
 ## 5. Safety-critical behaviour
 
 1. **Mutual-only connection.** `reconnect.decide` writes the caller's answer, then reads the other direction. It returns only `{ connected }` — never the other person's answer. A "maybe" is never surfaced.
-2. **Demo consent.** Seeded demo profiles have `openToReconnect` as a standing demo interest. When a real member chooses yes, the mutation records the demo profile's yes explicitly. The UI labels the profile, the plan and the resulting history as demo/sample. This exists only so the flow is testable in a one-person demo; it is not a pattern for real members.
-3. **Blocks delete pending answers** in both directions, so a later one-sided yes cannot create a connection.
+2. **Demo consent is deployment-gated.** Seeded demo profiles have `openToReconnect` as a standing demo interest. Demo consent is only recorded when `ALLOW_DEMO_SEED=true`; the UI labels the profile, the plan and the resulting history as demo/sample.
+3. **Blocks delete pending answers and end connections** in both directions, so a later one-sided yes cannot create a connection and unblocking cannot silently restore a relationship.
 4. **Reports never return to the reported member.** The reporter sees status only; internal notes stay moderator-side.
-5. **Moderation bootstrap is one-time.** `/moderation` lets the first member claim the role only while no admin exists. Production must grant roles server-side.
+5. **No public moderator bootstrap.** Roles are granted only with the internal `moderation.grantRole` owner procedure; disabling an account uses `moderation.setAccountStatus` and revokes sessions.
 6. **No verification claims.** The 18+ gate is self-declared and the UI says so. No identity provider is integrated.
 7. **Public venues only.** The data model has `venue` + `area`, not coordinates or addresses.
 
 ## 6. Demo data
 
-`seed.seedDemoCity` is idempotent via `demoSeed` markers.
+`seed.seedDemoCity` is idempotent via `demoSeed` markers and returns `enabled: false` unless `ALLOW_DEMO_SEED=true`. Guest access likewise requires `ALLOW_GUEST_DEMO=true`; both default to off in production.
 
 - `content:<city>` — five clearly labelled demo members, ten plans, five circles and discussion posts in the member's city.
 - `history:<userId>` — one past “sample history” plan with the member and two demo attendees, so the post-meetup flow works immediately.
@@ -131,14 +135,15 @@ Seeded demo accounts cannot sign in: they have no credentials.
 
 ## 7. Runtime and scale
 
-Queries cap lists (30 plans, 12 people, 40 posts, 100 reports) and use indexes for the primary access paths. Some per-row follow-up queries (counts, profiles) are intentionally simple; they are fine at prototype scale and would be denormalised or paginated before a city pilot. Convex reactivity means approvals, capacity and reconnect results update without polling.
+Queries cap lists (30 plans, 12 people, 40 posts, 100 reports, 30 audit rows) and use indexes for the primary access paths. Some per-row follow-up queries (counts, profiles) are intentionally simple; they are fine at prototype scale and would be denormalised or cursor-paginated before a city pilot. Convex reactivity means approvals, capacity and reconnect results update without polling.
 
 ## 8. Verification status
 
-- `bunx convex dev --once` — schema and functions deploy successfully.
-- `bunx tsc -b --noEmit` — passes for the client and functions.
-- `bun test` — 7 unit tests for the deterministic matching weights, reasons and edge cases.
-- No integration/E2E harness, load test, or device matrix exists yet. No browser-driven visual test was performed on a physical Android device, and the author could not drive the preview interactively from this environment.
-- Backend authorization was reviewed function by function, but has not been penetration-tested.
+- `bunx convex dev --once` — schema and functions deploy successfully to the development deployment.
+- `bunx tsc -b --noEmit` — passes.
+- `bun run test` — 14 unit tests (matching + policy windows/gates).
+- `bun run test:backend` — 14 `convex-test` integration tests with independent identities, covering moderator provisioning, disable, visibility, blocks, attendance (including no host bypass), mutual reconnection, abuse throttles, demo/guest gates, export privacy and resumable deletion.
+- `bun run lint` — 0 errors; remaining warnings are Fast Refresh hints in shadcn/generated files.
+- No browser E2E, load test, device matrix, accessibility audit or independent penetration test exists. No live deployed review URL was supplied.
 
 See [ROADMAP.md](./ROADMAP.md) for the testing work required before a pilot.

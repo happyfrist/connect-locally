@@ -4,11 +4,14 @@ import { mutation, query } from "./_generated/server";
 import { CATEGORY_MAP } from "./lib/catalog";
 import type { ReadCtx } from "./lib/auth";
 import {
+  enforceRateLimit,
+  getVisibleProfile,
   isBlockedPair,
   listBlockedIds,
   publicProfile,
   requireProfile,
 } from "./lib/auth";
+import { checkInState, reconnectState } from "./lib/policy";
 import { recurrenceValidator } from "./schema";
 
 const kindValidator = v.union(v.literal("activity"), v.literal("invitation"));
@@ -23,11 +26,8 @@ const budgetFilterValidator = v.union(
   v.literal("low"),
 );
 
-async function profileFor(ctx: ReadCtx, userId: Id<"users">) {
-  const profile = await ctx.db
-    .query("profiles")
-    .withIndex("by_user", (q) => q.eq("userId", userId))
-    .unique();
+async function profileFor(ctx: ReadCtx, viewerId: Id<"users">, userId: Id<"users">) {
+  const profile = await getVisibleProfile(ctx, viewerId, userId);
   return profile ? publicProfile(profile) : null;
 }
 
@@ -104,6 +104,8 @@ export const list = query({
         continue;
       }
 
+      const host = await profileFor(ctx, userId, activity.hostId);
+      if (!host) continue;
       const requests = await approvedRequests(ctx, activity._id);
       const approvedCount = requests.filter((r) => r.status === "approved").length;
       if (approvedCount >= activity.maxParticipants) continue;
@@ -129,7 +131,7 @@ export const list = query({
           autoApprove: activity.autoApprove ?? false,
           circleId: activity.circleId,
         },
-        host: await profileFor(ctx, activity.hostId),
+        host,
         approvedCount,
         spotsLeft: activity.maxParticipants - approvedCount,
         myStatus: activity.hostId === userId ? "host" : (requestByActivity.get(activity._id) ?? "none"),
@@ -149,6 +151,8 @@ export const get = query({
     const activity = await ctx.db.get(args.activityId);
     if (!activity) return null;
     if (await isBlockedPair(ctx, userId, activity.hostId)) return null;
+    const host = await profileFor(ctx, userId, activity.hostId);
+    if (!host) return null;
 
     const isHost = activity.hostId === userId;
     const requests = await approvedRequests(ctx, activity._id);
@@ -181,32 +185,34 @@ export const get = query({
 
     const participants = [];
     for (const id of participantIds.slice(0, 30)) {
-      const person = await profileFor(ctx, id);
+      const person = await profileFor(ctx, userId, id);
       if (person) participants.push(person);
     }
 
-    const host = await profileFor(ctx, activity.hostId);
     const circle = activity.circleId ? await ctx.db.get(activity.circleId) : null;
-    const updateAuthor = await profileFor(ctx, activity.hostId);
+    const updateAuthor = host;
     const attendeeRows = await ctx.db
       .query("attendance")
       .withIndex("by_activity", (q) => q.eq("activityId", activity._id))
       .collect();
     const reconnectIds = Array.from(
-      new Set([
-        activity.hostId,
-        ...attendeeRows.map((row) => row.userId),
-      ]),
+      new Set(attendeeRows.map((row) => row.userId)),
     ).filter((id) => id !== userId && !blocked.has(id as string));
 
     const reconnectCandidates =
-      attendance === null
+      attendance === null ||
+      reconnectState(
+        activity.startsAt,
+        activity.durationMins,
+        activity.status,
+        Date.now(),
+      ) !== "open"
         ? []
         : (
             await Promise.all(
               reconnectIds
                 .map(async (id) => {
-                  const person = await profileFor(ctx, id);
+                  const person = await profileFor(ctx, userId, id);
                   if (!person) return null;
                   const decision = await ctx.db
                     .query("reconnectDecisions")
@@ -245,17 +251,23 @@ export const get = query({
         authorName: updateAuthor?.displayName ?? "Host",
       })),
       hostRequests: isHost
-        ? await Promise.all(
-            requests
-              .filter((request) => request.status !== "withdrawn")
-              .map(async (request) => ({
-                _id: request._id,
-                status: request.status,
-                message: request.message ?? null,
-                createdAt: request.createdAt,
-                person: await profileFor(ctx, request.userId),
-              })),
-          )
+        ? (
+            await Promise.all(
+              requests
+                .filter(
+                  (request) =>
+                    request.status !== "withdrawn" &&
+                    !blocked.has(request.userId as string),
+                )
+                .map(async (request) => ({
+                  _id: request._id,
+                  status: request.status,
+                  message: request.message ?? null,
+                  createdAt: request.createdAt,
+                  person: await profileFor(ctx, userId, request.userId),
+                })),
+            )
+          ).filter((row) => row.person !== null)
         : [],
       reconnectCandidates,
       cityMatches: activity.city === profile.city,
@@ -273,6 +285,7 @@ function validateDraft(args: {
   durationMins: number;
   cost: number;
   maxParticipants: number;
+  minParticipants?: number;
 }) {
   const title = args.title.trim();
   const description = args.description.trim();
@@ -291,9 +304,16 @@ function validateDraft(args: {
   if (args.durationMins < 30 || args.durationMins > 720) {
     throw new Error("Plans should run between 30 minutes and 12 hours.");
   }
-  if (args.cost < 0) throw new Error("Cost can't be negative.");
+  if (args.cost < 0 || args.cost > 100_000) {
+    throw new Error("Cost must be between ₹0 and ₹1,00,000.");
+  }
   if (args.maxParticipants < 2 || args.maxParticipants > 30) {
     throw new Error("Plans need room for 2 to 30 people.");
+  }
+  if (args.minParticipants !== undefined) {
+    if (args.minParticipants < 2 || args.minParticipants > args.maxParticipants) {
+      throw new Error("Minimum participants must be between 2 and the maximum.");
+    }
   }
   return { title, description, venue: args.venue.trim(), area: args.area.trim() };
 }
@@ -322,6 +342,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { userId, profile } = await requireProfile(ctx);
+    await enforceRateLimit(ctx, userId, "activity:create", 10, 24 * 60 * 60_000);
     const clean = validateDraft(args);
 
     if (args.circleId) {
@@ -365,15 +386,8 @@ export const create = mutation({
       isDemo: false,
     });
 
-    if (args.kind === "invitation") {
-      // An open invitation is still a hosted plan; the host is a participant.
-      await ctx.db.insert("attendance", {
-        activityId,
-        userId,
-        method: "host",
-        markedAt: Date.now(),
-      });
-    }
+    // Hosts check in through the same time window as everyone else. Creating a
+    // plan must never pre-record attendance before the meeting happens.
     return activityId;
   },
 });
@@ -429,12 +443,16 @@ export const requestJoin = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireProfile(ctx);
+    await enforceRateLimit(ctx, userId, "activity:join", 30, 24 * 60 * 60_000);
     const activity = await ctx.db.get(args.activityId);
     if (!activity) throw new Error("That plan no longer exists.");
     if (activity.status !== "open") throw new Error("This plan has been cancelled.");
     if (activity.hostId === userId) throw new Error("You're hosting this plan.");
     if (activity.startsAt < Date.now()) throw new Error("This plan has already started.");
     if (await isBlockedPair(ctx, userId, activity.hostId)) {
+      throw new Error("This plan isn't available to you.");
+    }
+    if (!(await getVisibleProfile(ctx, userId, activity.hostId))) {
       throw new Error("This plan isn't available to you.");
     }
 
@@ -498,8 +516,12 @@ export const decideRequest = mutation({
     if (!request) throw new Error("That request no longer exists.");
     const activity = await ctx.db.get(request.activityId);
     if (!activity) throw new Error("That plan no longer exists.");
+    if (activity.status === "cancelled") throw new Error("This plan has been cancelled.");
     if (activity.hostId !== userId) throw new Error("Only the host can decide requests.");
     if (request.status !== "pending") throw new Error("This request was already handled.");
+    if (await isBlockedPair(ctx, userId, request.userId)) {
+      throw new Error("That request is no longer available.");
+    }
 
     if (args.decision === "approved") {
       const approvedCount = (await approvedRequests(ctx, activity._id)).filter(
@@ -563,6 +585,7 @@ export const postUpdate = mutation({
   args: { activityId: v.id("activities"), body: v.string() },
   handler: async (ctx, args) => {
     const { userId } = await requireProfile(ctx);
+    await enforceRateLimit(ctx, userId, "activity:update", 60, 60 * 60_000);
     const activity = await ctx.db.get(args.activityId);
     if (!activity) throw new Error("That plan no longer exists.");
     if (activity.hostId !== userId) throw new Error("Only the host can post updates.");
@@ -585,6 +608,9 @@ export const markAttendance = mutation({
     const { userId } = await requireProfile(ctx);
     const activity = await ctx.db.get(args.activityId);
     if (!activity) throw new Error("That plan no longer exists.");
+    if (activity.status === "cancelled") {
+      throw new Error("Cancelled plans can't record attendance.");
+    }
     if (activity.hostId !== userId) {
       const request = await ctx.db
         .query("joinRequests")
@@ -596,9 +622,14 @@ export const markAttendance = mutation({
         throw new Error("Only people on the participant list can check in.");
       }
     }
-    if (activity.startsAt > Date.now()) {
-      throw new Error("You can check in once the plan has started.");
+    const window = checkInState(activity.startsAt, activity.durationMins, Date.now());
+    if (window === "before") {
+      throw new Error("You can check in from 30 minutes before the plan starts.");
     }
+    if (window === "closed") {
+      throw new Error("The check-in window closed 24 hours after the plan ended.");
+    }
+    await enforceRateLimit(ctx, userId, "activity:checkin", 20, 24 * 60 * 60_000);
 
     const existing = await ctx.db
       .query("attendance")
@@ -672,6 +703,7 @@ export const myPlans = query({
       const activity = await ctx.db.get(id);
       if (!activity) continue;
       if (blocked.has(activity.hostId as string)) continue;
+      if (!(await getVisibleProfile(ctx, userId, activity.hostId))) continue;
       joined.push(activity);
     }
 
@@ -680,7 +712,7 @@ export const myPlans = query({
       const approvedRows = rows.filter((row) => row.status === "approved");
       return {
         activity,
-        host: await profileFor(ctx, activity.hostId),
+        host: await profileFor(ctx, userId, activity.hostId),
         approvedCount: approvedRows.length,
         pendingCount: rows.filter((row) => row.status === "pending").length,
         spotsLeft: activity.maxParticipants - approvedRows.length,
@@ -697,7 +729,7 @@ export const myPlans = query({
       const request = requests.find((row) => row.activityId === activity._id);
       return {
         activity,
-        host: await profileFor(ctx, activity.hostId),
+        host: await profileFor(ctx, userId, activity.hostId),
         approvedCount: approvedRows.length,
         pendingCount: 0,
         spotsLeft: activity.maxParticipants - approvedRows.length,

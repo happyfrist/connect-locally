@@ -1,3 +1,4 @@
+import { AccountNotice } from "@/components/AccountNotice";
 import { Avatar } from "@/components/product/ui";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -15,6 +16,7 @@ import {
   LANGUAGES,
 } from "@/convex/lib/catalog";
 import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import {
   ArrowLeft,
   ArrowRight,
@@ -23,8 +25,8 @@ import {
   MapPin,
   Sparkles,
 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { useState } from "react";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 
 type FormState = {
@@ -57,39 +59,29 @@ const initialForm: FormState = {
 
 const STEPS = ["You", "Where", "Interests", "Comfort", "Review"];
 
+type Me = NonNullable<FunctionReturnType<typeof api.profiles.me>>;
+
+function formFromProfile(profile: Me["profile"]): FormState {
+  if (!profile) return initialForm;
+  return {
+    displayName: profile.displayName,
+    city: profile.city,
+    area: profile.area,
+    bio: profile.bio,
+    languages: profile.languages,
+    interests: profile.interests,
+    activities: profile.activities,
+    availability: profile.availability,
+    groupSize: profile.groupSize,
+    budget: profile.budget,
+    comfort: profile.comfort,
+  };
+}
+
 export default function Onboarding() {
   const me = useQuery(api.profiles.me);
-  const complete = useMutation(api.profiles.completeOnboarding);
-  const seed = useMutation(api.seed.seedDemoCity);
-  const navigate = useNavigate();
   const [params] = useSearchParams();
   const isEditing = params.get("edit") === "1";
-
-  const [step, setStep] = useState(0);
-  const [form, setForm] = useState<FormState>(initialForm);
-  const [adult, setAdult] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [seeding, setSeeding] = useState(false);
-
-  useEffect(() => {
-    if (hydrated || !me?.profile) return;
-    setForm({
-      displayName: me.profile.displayName,
-      city: me.profile.city,
-      area: me.profile.area,
-      bio: me.profile.bio,
-      languages: me.profile.languages,
-      interests: me.profile.interests,
-      activities: me.profile.activities,
-      availability: me.profile.availability,
-      groupSize: me.profile.groupSize,
-      budget: me.profile.budget,
-      comfort: me.profile.comfort,
-    });
-    setAdult(true);
-    setHydrated(true);
-  }, [me, hydrated]);
 
   if (me === undefined) {
     return (
@@ -98,15 +90,41 @@ export default function Onboarding() {
       </div>
     );
   }
+  if (!me) return <Navigate to="/auth" replace />;
+  if (me.accountStatus && me.accountStatus !== "active") {
+    return <AccountNotice status={me.accountStatus} />;
+  }
 
-  const profile = me?.profile;
+  // Key by identity and mode so the form initialises once from the real profile
+  // instead of hydrating mutable form state inside an effect.
+  return (
+    <OnboardingForm
+      key={`${me.userId}:${isEditing ? "edit" : "new"}`}
+      me={me}
+      isEditing={isEditing}
+    />
+  );
+}
+
+function OnboardingForm({ me, isEditing }: { me: Me; isEditing: boolean }) {
+  const complete = useMutation(api.profiles.completeOnboarding);
+  const seed = useMutation(api.seed.seedDemoCity);
+  const navigate = useNavigate();
+
+  const [step, setStep] = useState(0);
+  const [form, setForm] = useState<FormState>(() => formFromProfile(me.profile));
+  const [adult, setAdult] = useState(Boolean(me.profile));
+  const [saving, setSaving] = useState(false);
+  const [seeding, setSeeding] = useState(false);
+
+  const profile = me.profile;
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
 
   const toggle = (key: "languages" | "interests" | "availability" | "activities", value: string) => {
     setForm((current) => {
       const has = current[key].includes(value);
-      let next = has
+      const next = has
         ? current[key].filter((item) => item !== value)
         : [...current[key], value];
       const result = { ...current, [key]: next };

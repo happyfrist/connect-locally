@@ -2,6 +2,7 @@ import { Avatar, CategoryChip, EmptyState } from "@/components/product/ui";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
 import { CalendarDays, Loader2, Plus, Users } from "lucide-react";
 import { useState } from "react";
@@ -25,7 +26,7 @@ export default function Circles() {
   const doJoin = async (circleId: string) => {
     setBusy(circleId);
     try {
-      const status = await join({ circleId: circleId as any });
+      const status = await join({ circleId: circleId as Id<"circles"> });
       toast.success(
         status === "approved"
           ? "You're in. The circle's discussions are now visible."

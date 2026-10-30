@@ -28,7 +28,6 @@ import {
   Flag,
   Loader2,
   Lock,
-  ShieldCheck,
   SlidersHorizontal,
 } from "lucide-react";
 import { useState } from "react";
@@ -43,7 +42,6 @@ export default function Moderation() {
     api.moderation.queue,
     status?.isModerator ? {} : "skip",
   );
-  const claim = useMutation(api.moderation.claimModerator);
   const resolve = useMutation(api.moderation.resolve);
 
   const [filter, setFilter] = useState<Filter>("open");
@@ -54,7 +52,6 @@ export default function Moderation() {
   >("none");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [claiming, setClaiming] = useState(false);
 
   if (status === undefined) {
     return (
@@ -65,18 +62,6 @@ export default function Moderation() {
     );
   }
 
-  const doClaim = async () => {
-    setClaiming(true);
-    try {
-      await claim({});
-      toast.success("You're now the first moderator. Actions are logged.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not claim access.");
-    } finally {
-      setClaiming(false);
-    }
-  };
-
   if (!status.isModerator) {
     return (
       <div className="mx-auto max-w-xl py-10">
@@ -85,38 +70,14 @@ export default function Moderation() {
             <Lock className="size-5 text-muted-foreground" />
           </div>
           <h1 className="mt-4 font-display text-2xl">Moderator access</h1>
-          {status.adminExists ? (
-            <>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                A moderator already exists for this workspace. Moderation is
-                least-privilege and role-restricted.
-              </p>
-              <Button asChild className="mt-5">
-                <Link to="/discover">Back to discover</Link>
-              </Button>
-            </>
-          ) : (
-            <>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                No moderator has been set up yet. In this prototype the first
-                signed-in member can claim the role once. Every action is written to
-                an audit log.
-              </p>
-              <Button className="mt-5 gap-2" onClick={doClaim} disabled={claiming}>
-                {claiming ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <ShieldCheck className="size-4" />
-                )}
-                Claim moderator access
-              </Button>
-              <p className="mt-3 text-[11px] leading-5 text-muted-foreground">
-                Only use this if you're the person running this deployment. In
-                production, moderator roles should be granted server-side, not by
-                self-service.
-              </p>
-            </>
-          )}
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Moderation is least-privilege and role-restricted. There is no
+            self-service signup for this role. The deployment owner grants it
+            with a trusted server-side procedure; every decision is audited.
+          </p>
+          <Button asChild className="mt-5">
+            <Link to="/discover">Back to discover</Link>
+          </Button>
         </div>
       </div>
     );
@@ -428,7 +389,8 @@ export default function Moderation() {
               </Select>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 “Remove” cancels a plan or makes a circle request-only. “Restrict”
-                hides the member's profile from discovery. Both are logged.
+                disables the responsible account and revokes its sessions. Both are
+                logged.
               </p>
             </div>
 

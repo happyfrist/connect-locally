@@ -4,6 +4,8 @@ import { mutation, query } from "./_generated/server";
 import { CATEGORY_MAP } from "./lib/catalog";
 import type { ReadCtx } from "./lib/auth";
 import {
+  enforceRateLimit,
+  getVisibleProfile,
   isBlockedPair,
   listBlockedIds,
   publicProfile,
@@ -20,11 +22,8 @@ async function membersOf(ctx: ReadCtx, circleId: Id<"circles">) {
     .collect();
 }
 
-async function profileFor(ctx: ReadCtx, userId: Id<"users">) {
-  const profile = await ctx.db
-    .query("profiles")
-    .withIndex("by_user", (q) => q.eq("userId", userId))
-    .unique();
+async function profileFor(ctx: ReadCtx, viewerId: Id<"users">, userId: Id<"users">) {
+  const profile = await getVisibleProfile(ctx, viewerId, userId);
   return profile ? publicProfile(profile) : null;
 }
 
@@ -51,6 +50,8 @@ export const list = query({
     for (const circle of circles) {
       if (args.kind && circle.kind !== args.kind) continue;
       if (blocked.has(circle.hostId as string)) continue;
+      const host = await profileFor(ctx, userId, circle.hostId);
+      if (!host) continue;
       const members = await membersOf(ctx, circle._id);
       const approved = members.filter((member) => member.status === "approved");
       rows.push({
@@ -65,7 +66,7 @@ export const list = query({
         joinPolicy: circle.joinPolicy,
         maxMembers: circle.maxMembers ?? null,
         isDemo: circle.isDemo ?? false,
-        host: await profileFor(ctx, circle.hostId),
+        host,
         memberCount: approved.length,
         membershipStatus: membershipByCircle.get(circle._id)?.status ?? "none",
       });
@@ -82,6 +83,9 @@ export const get = query({
     const circle = await ctx.db.get(args.circleId);
     if (!circle) return null;
     if (await isBlockedPair(ctx, userId, circle.hostId)) return null;
+    const host = await profileFor(ctx, userId, circle.hostId);
+    if (!host) return null;
+    const blocked = await listBlockedIds(ctx, userId);
 
     const members = await membersOf(ctx, circle._id);
     const membership = members.find((member) => member.userId === userId) ?? null;
@@ -90,7 +94,8 @@ export const get = query({
 
     const approvedMembers = [];
     for (const member of members.filter((row) => row.status === "approved")) {
-      const person = await profileFor(ctx, member.userId);
+      if (blocked.has(member.userId as string)) continue;
+      const person = await profileFor(ctx, userId, member.userId);
       if (person) {
         approvedMembers.push({
           ...person,
@@ -101,15 +106,20 @@ export const get = query({
     }
 
     const pendingMembers = isHost
-      ? await Promise.all(
-          members
-            .filter((row) => row.status === "pending")
-            .map(async (row) => ({
-              requestId: row._id,
-              person: await profileFor(ctx, row.userId),
-              joinedAt: row.joinedAt,
-            })),
-        )
+      ? (
+          await Promise.all(
+            members
+              .filter(
+                (row) =>
+                  row.status === "pending" && !blocked.has(row.userId as string),
+              )
+              .map(async (row) => ({
+                requestId: row._id,
+                person: await profileFor(ctx, userId, row.userId),
+                joinedAt: row.joinedAt,
+              })),
+          )
+        ).filter((row) => row.person !== null)
       : [];
 
     const posts = isMember
@@ -125,36 +135,42 @@ export const get = query({
 
     const postsWithAuthors = [];
     for (const post of posts) {
+      if (blocked.has(post.authorId as string)) continue;
+      const author = await profileFor(ctx, userId, post.authorId);
+      if (!author) continue;
       postsWithAuthors.push({
         _id: post._id,
         body: post.body,
         kind: post.kind,
         createdAt: post.createdAt,
-        author: await profileFor(ctx, post.authorId),
+        author,
         isMine: post.authorId === userId,
       });
     }
 
-    const activities = (
+    const activities = [];
+    for (const activity of (
       await ctx.db
         .query("activities")
         .withIndex("by_circle", (q) => q.eq("circleId", args.circleId))
         .collect()
-    )
-      .filter((activity) => activity.status === "open" && activity.startsAt > Date.now())
-      .sort((a, b) => a.startsAt - b.startsAt)
-      .map((activity) => ({
+    ).filter((row) => row.status === "open" && row.startsAt > Date.now())) {
+      if (blocked.has(activity.hostId as string)) continue;
+      if (!(await profileFor(ctx, userId, activity.hostId))) continue;
+      activities.push({
         _id: activity._id,
         title: activity.title,
         startsAt: activity.startsAt,
         area: activity.area,
         venue: activity.venue,
         category: activity.category,
-      }));
+      });
+    }
+    activities.sort((a, b) => a.startsAt - b.startsAt);
 
     return {
       circle,
-      host: await profileFor(ctx, circle.hostId),
+      host,
       members: approvedMembers,
       pendingMembers,
       membershipStatus: membership?.status ?? "none",
@@ -182,6 +198,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { userId, profile } = await requireProfile(ctx);
+    await enforceRateLimit(ctx, userId, "circle:create", 5, 24 * 60 * 60_000);
     const name = args.name.trim();
     const description = args.description.trim();
     if (name.length < 3 || name.length > 60) {
@@ -195,6 +212,11 @@ export const create = mutation({
     if (!args.cadence.trim()) throw new Error("Say how often the circle meets.");
     if (args.maxMembers !== undefined && (args.maxMembers < 2 || args.maxMembers > 100)) {
       throw new Error("Membership limit should be between 2 and 100.");
+    }
+    if (args.rules && args.rules.length > 1000) throw new Error("Keep circle rules under 1000 characters.");
+    if (args.cadence.length > 80) throw new Error("Keep the meeting cadence under 80 characters.");
+    if (args.prompts && (args.prompts.length > 12 || args.prompts.some((prompt) => prompt.length > 240))) {
+      throw new Error("Use up to 12 prompts of at most 240 characters.");
     }
 
     const circleId = await ctx.db.insert("circles", {
@@ -228,9 +250,13 @@ export const join = mutation({
   args: { circleId: v.id("circles") },
   handler: async (ctx, args) => {
     const { userId } = await requireProfile(ctx);
+    await enforceRateLimit(ctx, userId, "circle:join", 20, 24 * 60 * 60_000);
     const circle = await ctx.db.get(args.circleId);
     if (!circle) throw new Error("That circle no longer exists.");
     if (await isBlockedPair(ctx, userId, circle.hostId)) {
+      throw new Error("This circle isn't available to you.");
+    }
+    if (!(await getVisibleProfile(ctx, userId, circle.hostId))) {
       throw new Error("This circle isn't available to you.");
     }
     const existing = await ctx.db
@@ -267,6 +293,7 @@ export const decideMember = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireProfile(ctx);
+    await enforceRateLimit(ctx, userId, "circle:decide", 300, 24 * 60 * 60_000);
     const circle = await ctx.db.get(args.circleId);
     if (!circle) throw new Error("That circle no longer exists.");
     if (circle.hostId !== userId) throw new Error("Only the host can approve members.");
@@ -275,6 +302,9 @@ export const decideMember = mutation({
       throw new Error("That membership request no longer exists.");
     }
     if (membership.status !== "pending") throw new Error("Already handled.");
+    if (await isBlockedPair(ctx, userId, membership.userId)) {
+      throw new Error("That membership request is no longer available.");
+    }
     if (args.decision === "declined") {
       await ctx.db.delete(args.requestId);
       return;
@@ -296,6 +326,12 @@ export const post = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireProfile(ctx);
+    await enforceRateLimit(ctx, userId, "circle:post", 60, 60 * 60_000);
+    const circle = await ctx.db.get(args.circleId);
+    if (!circle) throw new Error("That circle no longer exists.");
+    if (await isBlockedPair(ctx, userId, circle.hostId)) {
+      throw new Error("This circle isn't available to you.");
+    }
     const membership = await ctx.db
       .query("circleMembers")
       .withIndex("by_circle_user", (q) =>

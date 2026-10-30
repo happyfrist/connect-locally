@@ -1,6 +1,12 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
-import { connectionExists, listBlockedIds, publicProfile, requireProfile } from "./lib/auth";
+import {
+  connectionExists,
+  getVisibleProfile,
+  listBlockedIds,
+  publicProfile,
+  requireProfile,
+} from "./lib/auth";
 import { scoreMatch } from "./lib/matching";
 
 export const suggestions = query({
@@ -11,20 +17,21 @@ export const suggestions = query({
       ctx.db
         .query("profiles")
         .withIndex("by_city", (q) => q.eq("city", profile.city))
-        .collect(),
+        .take(200),
       listBlockedIds(ctx, userId),
     ]);
 
     const candidates = [];
     for (const person of people) {
       if (person.userId === userId) continue;
-      if (!person.onboardingComplete || person.hidden) continue;
       if (blocked.has(person.userId as string)) continue;
+      const visible = await getVisibleProfile(ctx, userId, person.userId);
+      if (!visible) continue;
       if (await connectionExists(ctx, userId, person.userId)) continue;
 
-      const match = scoreMatch(profile, person);
+      const match = scoreMatch(profile, visible);
       candidates.push({
-        person: publicProfile(person),
+        person: publicProfile(visible),
         ...match,
       });
     }
@@ -44,11 +51,8 @@ export const detail = query({
     }
     const blocked = await listBlockedIds(ctx, userId);
     if (blocked.has(args.userId as string)) return null;
-    const other = await ctx.db
-      .query("profiles")
-      .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .unique();
-    if (!other || !other.onboardingComplete) return null;
+    const other = await getVisibleProfile(ctx, userId, args.userId);
+    if (!other) return null;
 
     return {
       person: publicProfile(other),

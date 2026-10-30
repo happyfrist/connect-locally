@@ -1,3 +1,4 @@
+import { AccountNotice } from "@/components/AccountNotice";
 import { Avatar } from "@/components/product/ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +31,7 @@ import {
   SlidersHorizontal,
   Users,
 } from "lucide-react";
+import { useState } from "react";
 import { Link, Navigate, NavLink, Outlet, useLocation } from "react-router";
 
 const primaryNav = [
@@ -57,17 +59,18 @@ function Brand() {
 function Notifications() {
   const plans = useQuery(api.activities.myPlans);
   const connections = useQuery(api.reconnect.myConnections);
+  // Snapshot the clock once; a notification badge does not need per-render
+  // time reads (and render must stay pure).
+  const [now] = useState(() => Date.now());
 
   const pendingHosting = (plans?.hosting ?? []).filter(
     (row) => row.pendingCount > 0,
   );
   const soon = (plans?.upcoming ?? []).filter(
-    (row) =>
-      row.activity.startsAt > Date.now() &&
-      row.activity.startsAt < Date.now() + 48 * 3600_000,
+    (row) => row.activity.startsAt > now && row.activity.startsAt < now + 48 * 3600_000,
   );
   const recentConnections = (connections ?? []).filter(
-    (row) => row.createdAt > Date.now() - 7 * 86_400_000,
+    (row) => row.createdAt > now - 7 * 86_400_000,
   );
   const total =
     pendingHosting.reduce((sum, row) => sum + row.pendingCount, 0) +
@@ -165,6 +168,9 @@ export function AppShell() {
         <Loader2 className="size-5 animate-spin text-muted-foreground" />
       </div>
     );
+  }
+  if (me?.accountStatus && me.accountStatus !== "active") {
+    return <AccountNotice status={me.accountStatus} />;
   }
   if (me === null || !me.profile || !me.onboardingComplete) {
     return <Navigate to="/onboarding" replace />;

@@ -14,7 +14,7 @@ A responsive web application (mobile-first) with a real backend, not mock screen
 
 | Area | Status |
 | --- | --- |
-| Email OTP + guest sign-in | Working (Convex Auth) |
+| Email OTP + guest sign-in | Email working; guest is an opt-in demo-only mode |
 | 18+ onboarding and progressive profile | Working |
 | Activity-first discovery with filters | Working |
 | Explainable people matching | Working |
@@ -25,9 +25,10 @@ A responsive web application (mobile-first) with a real backend, not mock screen
 | Mutual-only reconnection → connections | Working |
 | Circles, friendship pods, conversation circles | Working |
 | Circle membership approval + discussions | Working |
-| Blocking, reporting, moderator queue, audit log | Working |
-| Data export and data deletion | Working |
-| Demo city seeding (clearly labelled) | Working |
+| Blocking, reporting, moderator queue, audit log | Working; roles owner-provisioned |
+| Data export and resumable account deletion | Working; safety records retained |
+| Demo city seeding (clearly labelled) | Dev opt-in only (`ALLOW_DEMO_SEED`) |
+| Rate limits on sensitive mutations | Working |
 | Direct messages between connections | **Not implemented** |
 | Photo upload, maps, push notifications, payments | **Not implemented** |
 | Identity verification, background checks | **Not implemented, not claimed** |
@@ -59,11 +60,13 @@ The development server and Convex dev process are managed by the Freebuff enviro
 bun install
 bunx convex dev --once   # push schema/functions and regenerate types
 bunx tsc -b --noEmit     # typecheck
+bun run lint             # ESLint (warnings only in generated/shadcn files)
+bun run test:all         # Bun unit tests + Vitest/Convex backend integration tests
 ```
 
 Environment variables are managed by the host. The client uses `VITE_CONVEX_URL`; Convex secrets stay server-side and are never imported into client code.
 
-There are no seeding scripts to run. After a new member finishes onboarding, a small demo city is added automatically so the full journey can be tried immediately. Every seeded profile and plan is labelled **demo**.
+Demo seeding is **off by default**. It only runs when the deployment explicitly sets `ALLOW_DEMO_SEED=true`. Guest sign-in is also **off by default** and requires `ALLOW_GUEST_DEMO=true`; guest accounts are not verified accounts and cannot participate in a production deployment. The development deployment in this workspace sets both flags for the walkthrough; production must set neither. When demo seeding is enabled, a seeded city is added after onboarding and every seeded profile/plan is labelled **demo**.
 
 ---
 
@@ -77,7 +80,11 @@ There are no seeding scripts to run. After a new member finishes onboarding, a s
 6. **Connections** shows the mutual result.
 7. **Create** a plan of your own. Open it, post an update, cancel it, and approve/decline requests when a second account asks to join.
 8. **Circles** → join *Independent Learners*, read the discussion, add a plan to the circle.
-9. **Moderation**: visit `/moderation`, claim first-moderator access (one-time bootstrap in this prototype), then report a plan from its page and process the report. Every action is audit-logged.
+9. **Moderation**: report a plan from its page. To review it, grant your signed-up account a moderator role with the owner-only internal procedure:
+   ```bash
+   bunx convex run moderation:grantRole '{"email":"you@example.com","role":"moderator"}'
+   ```
+   Then visit `/moderation` and process the report. There is deliberately no public claim button. Every action is audit-logged.
 10. **Safety centre**: export your data, copy a safety plan for an upcoming meetup, block a member, delete your data.
 
 To test the *real* host-approval and mutual-reconnect rules rather than the demo helper, use two guest accounts in two browser profiles.
@@ -86,11 +93,11 @@ To test the *real* host-approval and mutual-reconnect rules rather than the demo
 
 ## Privacy in one paragraph
 
-Connectmaxxing stores only what the flow needs: display name, city, neighbourhood, optional bio, languages, interests, preferences, plans, requests, check-ins, private reconnect answers, journal entries and reports. It never asks for an exact address, phone number, identity document, contacts or background location. A one-sided reconnect answer is never returned to the other person, and is deleted if either person blocks the other. There is no third-party analytics, advertising or payment integration in this version. Details and retention limits: [PRIVACY.md](./PRIVACY.md).
+Connectmaxxing stores only what the flow needs: display name, city, neighbourhood, optional bio, languages, interests, preferences, plans, requests, check-ins, private reconnect answers, journal entries and reports. It never asks for an exact address, phone number, identity document, contacts or background location. A one-sided reconnect answer is never returned to the other person, and is deleted if either person blocks the other. Account deletion revokes auth sessions and provider identities, then removes product records in resumable batches; moderation reports and the audit log are retained as an unidentified safety record. There is no third-party analytics, advertising or payment integration in this version. Details and retention limits: [PRIVACY.md](./PRIVACY.md).
 
 ## Safety in one paragraph
 
-Plans must use a public venue with a start and end time; join requests require host approval; blocked pairs cannot see or join each other's plans; reports go to a role-restricted queue with an audit trail. There is **no** identity verification, age verification beyond self-declaration, emergency response, or staffed moderation team. The 18+ gate is self-attested and described as such in the product. Read [SAFETY.md](./SAFETY.md) before doing anything real-world with this.
+Plans must use a public venue with a start and end time; join requests require host approval; blocked pairs cannot see or join each other's plans, and blocking ends a connection. Check-in is limited to a defined window and reconnection only opens after a plan ends. Reports go to a role-restricted, audited queue. There is **no** identity verification, age verification beyond self-declaration, emergency response, or staffed moderation team. The 18+ gate is self-attested and described as such in the product. Read [SAFETY.md](./SAFETY.md) before doing anything real-world with this.
 
 ## Licence
 
@@ -105,3 +112,4 @@ No licence file is included yet. Recommendation: **AGPL-3.0** for a networked pr
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — workflow, conventions and review expectations.
 - [CHANGELOG.md](./CHANGELOG.md) — what shipped in this prototype.
 - [ROADMAP.md](./ROADMAP.md) — prioritised next work and open decisions.
+- [PRODUCTION_READINESS.md](./PRODUCTION_READINESS.md) — verified fixes, test evidence, unresolved blockers and go/no-go status.

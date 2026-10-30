@@ -21,7 +21,7 @@ export type ActivityCardData = {
     beginnerFriendly: boolean;
     recurrence: "once" | "weekly" | "biweekly" | "monthly";
     status: "open" | "cancelled";
-    isDemo: boolean;
+    isDemo?: boolean;
   };
   host: {
     displayName: string;

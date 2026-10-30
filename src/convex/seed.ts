@@ -1,7 +1,8 @@
-import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { mutation } from "./_generated/server";
 import { requireProfile } from "./lib/auth";
+import { demoSeedEnabled } from "./lib/policy";
 
 const DAY = 864e5;
 
@@ -39,13 +40,13 @@ function nextWeekday(day: number, hour: number, minute = 0) {
 }
 
 async function ensureDemoUser(
-  ctx: any,
+  ctx: MutationCtx,
   seed: Omit<DemoPersonSeed, "city"> & { city: string },
 ) {
   const email = demoEmail(seed.key, seed.city);
   const existing = await ctx.db
     .query("users")
-    .withIndex("email", (q: any) => q.eq("email", email))
+    .withIndex("email", (q) => q.eq("email", email))
     .unique();
 
   const userId =
@@ -58,7 +59,7 @@ async function ensureDemoUser(
 
   const profile = await ctx.db
     .query("profiles")
-    .withIndex("by_user", (q: any) => q.eq("userId", userId))
+    .withIndex("by_user", (q) => q.eq("userId", userId))
     .unique();
 
   if (!profile) {
@@ -93,6 +94,16 @@ export const seedDemoCity = mutation({
   args: {},
   handler: async (ctx) => {
     const { userId, profile } = await requireProfile(ctx);
+    if (!demoSeedEnabled(process.env)) {
+      // Safe default. A production deployment must never populate itself with
+      // fake people or fake attendance unless the owner explicitly opts in.
+      return {
+        enabled: false,
+        contentCreated: false,
+        historyCreated: false,
+        city: profile.city,
+      };
+    }
     const city = profile.city;
     const now = Date.now();
     const isBengaluru = city.toLowerCase() === "bengaluru";
@@ -720,6 +731,6 @@ export const seedDemoCity = mutation({
       historyCreated = true;
     }
 
-    return { contentCreated, historyCreated, city };
+    return { enabled: true, contentCreated, historyCreated, city };
   },
 });

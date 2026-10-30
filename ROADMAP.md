@@ -16,14 +16,14 @@ These are launch blockers, not stretch goals.
 
 ## Next (before a public pilot)
 
-- **Integration tests** for authorization: blocked pair cannot join, non-host cannot approve, user cannot read another's reconnect answer, non-member cannot read circle posts, non-admin cannot resolve reports.
-- **E2E journeys** with two accounts: host approval, cancellation, mutual reconnect, block, report → moderation, export/delete.
-- **Rate limiting and abuse controls** on join requests, reports, circle joins and sign-up.
+- **Expand backend tests** to every remaining mutation: non-host approval, circle capacity races, duplicate join requests, report lifecycle transitions and rate-limit boundaries.
+- **E2E journeys** with two accounts in a real browser: host approval, cancellation, mutual reconnect, block, report → moderation, export/delete.
+- **Platform-level abuse controls**: edge/WAF throttling, monitoring and alerting beyond the app's fixed-window counters; no invasive device fingerprinting.
 - **Recurring occurrences**: the current `recurrence` field is descriptive only. Generate real future occurrences with edit/cancel scope.
 - **Notifications**: approval, change, cancellation, mutual connection and upcoming-plan reminders. Preferences and a quiet-by-default design; no re-engagement nudges.
 - **Event-scoped communication**: host ↔ attendee coordination and a connection-only conversation, with request controls, mute, block and report. Never unrestricted stranger messaging.
 - **Accessibility audit** against WCAG 2.2 AA, including keyboard navigation, focus management, contrast and reduced motion. Small-Android layout has been designed for, not device-tested.
-- **Data lifecycle**: automated retention, scheduled deletion, backup policy, export completeness, auth-session revocation on deletion.
+- **Data lifecycle**: legally reviewed retention periods, backup policy, export completeness and periodic deletion-worker monitoring. Session revocation and resumable product-record deletion now exist.
 - **Photo support** with consent, moderation and EXIF stripping — or keep it out. The product works without photos.
 - **Postgres/PostGIS migration path** if native apps require it; keep the domain services portable.
 
@@ -61,4 +61,4 @@ These are launch blockers, not stretch goals.
 - No payments or ticketing.
 - No identity or age verification.
 - No admin web app separate from the member app; moderation is a role-restricted route in the same client.
-- No automated test suite for Convex functions or browser journeys yet; only deterministic matching has unit tests.
+- Backend integration tests now cover the highest-risk authorization and lifecycle paths, but there is no browser E2E suite, load test or real-device matrix.

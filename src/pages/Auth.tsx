@@ -14,7 +14,9 @@ import {
   InputOTPSlot,
 } from "@/components/ui/input-otp";
 
+import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
+import { useQuery } from "convex/react";
 import { ArrowLeft, ArrowRight, Loader2, Mail, ShieldCheck, UserRound } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
@@ -35,6 +37,7 @@ function resolveRedirectAfterAuth(
 
 function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const { isLoading: authLoading, isAuthenticated, signIn } = useAuth();
+  const appConfig = useQuery(api.config.appConfig);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirect = resolveRedirectAfterAuth(
@@ -170,33 +173,36 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       <p className="mt-2 text-sm text-destructive">{error}</p>
                     ) : null}
 
-                    <div className="mt-5">
-                      <div className="relative">
-                        <div className="absolute inset-0 flex items-center">
-                          <span className="w-full border-t" />
+                    {appConfig?.guestAccessEnabled ? (
+                      <div className="mt-5">
+                        <div className="relative">
+                          <div className="absolute inset-0 flex items-center">
+                            <span className="w-full border-t" />
+                          </div>
+                          <div className="relative flex justify-center text-[10px] uppercase tracking-wider">
+                            <span className="bg-card px-2 text-muted-foreground">
+                              Demo access
+                            </span>
+                          </div>
                         </div>
-                        <div className="relative flex justify-center text-[10px] uppercase tracking-wider">
-                          <span className="bg-card px-2 text-muted-foreground">
-                            Or look around first
-                          </span>
-                        </div>
-                      </div>
 
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="mt-4 w-full gap-2"
-                        onClick={handleGuestLogin}
-                        disabled={isLoading}
-                      >
-                        <UserRound className="size-4" />
-                        Continue as a guest
-                      </Button>
-                      <p className="mt-2 text-center text-[11px] leading-5 text-muted-foreground">
-                        Guest accounts are demo accounts. Add an email later to keep
-                        your profile and plans.
-                      </p>
-                    </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="mt-4 w-full gap-2"
+                          onClick={handleGuestLogin}
+                          disabled={isLoading}
+                        >
+                          <UserRound className="size-4" />
+                          Continue as a guest
+                        </Button>
+                        <p className="mt-2 text-center text-[11px] leading-5 text-muted-foreground">
+                          Guest access is enabled only on this demonstration
+                          deployment. It is not a verified account and is not
+                          available in production.
+                        </p>
+                      </div>
+                    ) : null}
                   </CardContent>
                 </form>
               </>

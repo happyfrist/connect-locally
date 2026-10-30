@@ -13,8 +13,17 @@ export const roleValidator = v.union(
   v.literal(ROLES.ADMIN),
   v.literal(ROLES.USER),
   v.literal(ROLES.MEMBER),
+  v.literal("moderator"),
 );
 export type Role = Infer<typeof roleValidator>;
+
+// Absent means active for accounts created before this field existed.
+export const accountStatusValidator = v.union(
+  v.literal("active"),
+  v.literal("disabled"),
+  v.literal("deleting"),
+  v.literal("deleted"),
+);
 
 export const groupSizeValidator = v.union(
   v.literal("one"),
@@ -87,6 +96,8 @@ const schema = defineSchema(
       isAnonymous: v.optional(v.boolean()), // is the user anonymous. do not remove
 
       role: v.optional(roleValidator), // role of the user. do not remove
+      accountStatus: v.optional(accountStatusValidator),
+      deletedAt: v.optional(v.number()),
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
     // Everything below belongs to the Connectmaxxing product.
@@ -154,7 +165,9 @@ const schema = defineSchema(
       authorId: v.id("users"),
       body: v.string(),
       createdAt: v.number(),
-    }).index("by_activity", ["activityId"]),
+    })
+      .index("by_activity", ["activityId"])
+      .index("by_author", ["authorId"]),
 
     joinRequests: defineTable({
       activityId: v.id("activities"),
@@ -188,6 +201,8 @@ const schema = defineSchema(
     })
       .index("by_activity", ["activityId"])
       .index("by_from", ["fromUserId"])
+      .index("by_to", ["toUserId"])
+      .index("by_from_to", ["fromUserId", "toUserId"])
       .index("by_pair", ["activityId", "fromUserId", "toUserId"]),
 
     connections: defineTable({
@@ -198,7 +213,8 @@ const schema = defineSchema(
     })
       .index("by_userA", ["userA"])
       .index("by_userB", ["userB"])
-      .index("by_pair", ["userA", "userB"]),
+      .index("by_pair", ["userA", "userB"])
+      .index("by_activity", ["activityId"]),
 
     blocks: defineTable({
       blockerId: v.id("users"),
@@ -245,7 +261,9 @@ const schema = defineSchema(
       body: v.string(),
       kind: v.union(v.literal("discussion"), v.literal("announcement")),
       createdAt: v.number(),
-    }).index("by_circle", ["circleId"]),
+    })
+      .index("by_circle", ["circleId"])
+      .index("by_author", ["authorId"]),
 
     journalEntries: defineTable({
       userId: v.id("users"),
@@ -279,13 +297,32 @@ const schema = defineSchema(
       .index("by_reporter", ["reporterId"]),
 
     auditLog: defineTable({
-      actorId: v.id("users"),
+      // System/owner procedures have no signed-in actor. Member rows are kept
+      // as a tombstone after account deletion so moderation remains auditable.
+      actorId: v.optional(v.id("users")),
       action: v.string(),
       targetType: v.string(),
       targetId: v.string(),
       note: v.optional(v.string()),
       createdAt: v.number(),
     }).index("by_createdAt", ["createdAt"]),
+
+    rateLimits: defineTable({
+      bucket: v.string(),
+      windowStart: v.number(),
+      count: v.number(),
+    }).index("by_bucket", ["bucket"]),
+
+    accountDeletions: defineTable({
+      userId: v.id("users"),
+      status: v.union(v.literal("pending"), v.literal("running"), v.literal("complete")),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+      completedAt: v.optional(v.number()),
+      lastError: v.optional(v.string()),
+    })
+      .index("by_user", ["userId"])
+      .index("by_status", ["status"]),
 
     demoSeed: defineTable({
       key: v.string(),
