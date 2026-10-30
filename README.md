@@ -101,4 +101,7 @@ No licence file is included yet. Recommendation: **AGPL-3.0** for a networked pr
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — domain model, authorization, matching, demo data.
 - [SAFETY.md](./SAFETY.md) — implemented safeguards, known gaps, incident handling.
 - [PRIVACY.md](./PRIVACY.md) — data inventory, user rights, legal-review questions.
+- [SECURITY.md](./SECURITY.md) — reporting, current controls and pilot blockers.
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — workflow, conventions and review expectations.
+- [CHANGELOG.md](./CHANGELOG.md) — what shipped in this prototype.
 - [ROADMAP.md](./ROADMAP.md) — prioritised next work and open decisions.

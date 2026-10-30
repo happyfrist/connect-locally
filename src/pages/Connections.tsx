@@ -2,13 +2,28 @@ import { Avatar, EmptyState } from "@/components/product/ui";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { formatDay, shortName } from "@/lib/format";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { CalendarPlus, HeartHandshake, Lock } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router";
+import { toast } from "sonner";
 
 export default function Connections() {
   const connections = useQuery(api.reconnect.myConnections);
+  const removeConnection = useMutation(api.reconnect.removeConnection);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+
+  const doRemove = async (connectionId: string) => {
+    try {
+      await removeConnection({ connectionId: connectionId as Id<"connections"> });
+      setConfirmId(null);
+      toast.success("Connection removed. You can meet again through a new plan.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not remove the connection.");
+    }
+  };
 
   return (
     <div>
@@ -105,6 +120,34 @@ export default function Connections() {
                   <CalendarPlus className="size-4" /> Plan something else
                 </Link>
               </Button>
+
+              {confirmId === connection._id ? (
+                <div className="mt-2 rounded-lg bg-destructive/5 px-3 py-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    Remove this connection? Private answers between you are deleted.
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => setConfirmId(null)}>
+                      Keep
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => doRemove(connection._id)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmId(connection._id)}
+                  className="mt-2 self-start text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  Remove connection
+                </button>
+              )}
             </article>
           ))}
         </div>

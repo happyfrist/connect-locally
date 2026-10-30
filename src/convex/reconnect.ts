@@ -126,6 +126,39 @@ export const decide = mutation({
   },
 });
 
+export const removeConnection = mutation({
+  args: { connectionId: v.id("connections") },
+  handler: async (ctx, args) => {
+    const { userId } = await requireProfile(ctx);
+    const connection = await ctx.db.get(args.connectionId);
+    if (!connection) return;
+    if (connection.userA !== userId && connection.userB !== userId) {
+      throw new Error("That connection isn't yours to remove.");
+    }
+    const otherId =
+      connection.userA === userId ? connection.userB : connection.userA;
+    // Both sides' private answers are removed too, so the connection can't be
+    // silently recreated and either person can meet again through a new plan.
+    const [mine, theirs] = await Promise.all([
+      ctx.db
+        .query("reconnectDecisions")
+        .withIndex("by_from", (q) => q.eq("fromUserId", userId))
+        .collect(),
+      ctx.db
+        .query("reconnectDecisions")
+        .withIndex("by_from", (q) => q.eq("fromUserId", otherId))
+        .collect(),
+    ]);
+    for (const row of mine) {
+      if (row.toUserId === otherId) await ctx.db.delete(row._id);
+    }
+    for (const row of theirs) {
+      if (row.toUserId === userId) await ctx.db.delete(row._id);
+    }
+    await ctx.db.delete(args.connectionId);
+  },
+});
+
 export const myConnections = query({
   args: {},
   handler: async (ctx) => {
