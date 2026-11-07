@@ -11,5 +11,7 @@ export const appConfig = query({
   handler: async () => ({
     demoSeedEnabled: demoSeedEnabled(process.env),
     guestAccessEnabled: guestDemoEnabled(process.env),
+    // Presence of the gateway key is a deployment capability, not a secret.
+    emailNotificationsAvailable: Boolean(process.env.VLY_INTEGRATION_KEY),
   }),
 });

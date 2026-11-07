@@ -16,11 +16,12 @@ import {
 } from "@/components/ui/popover";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
-import { formatWhen, shortName } from "@/lib/format";
+import { formatWhen, shortName, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import {
   Bell,
+  CheckCheck,
   BookHeart,
   CalendarCheck,
   Compass,
@@ -58,24 +59,19 @@ function Brand() {
 
 function Notifications() {
   const plans = useQuery(api.activities.myPlans);
-  const connections = useQuery(api.reconnect.myConnections);
+  const feed = useQuery(api.notifications.mine);
+  const markRead = useMutation(api.notifications.markRead);
+  const markAllRead = useMutation(api.notifications.markAllRead);
   // Snapshot the clock once; a notification badge does not need per-render
   // time reads (and render must stay pure).
   const [now] = useState(() => Date.now());
 
-  const pendingHosting = (plans?.hosting ?? []).filter(
-    (row) => row.pendingCount > 0,
-  );
   const soon = (plans?.upcoming ?? []).filter(
     (row) => row.activity.startsAt > now && row.activity.startsAt < now + 48 * 3600_000,
   );
-  const recentConnections = (connections ?? []).filter(
-    (row) => row.createdAt > now - 7 * 86_400_000,
-  );
-  const total =
-    pendingHosting.reduce((sum, row) => sum + row.pendingCount, 0) +
-    soon.length +
-    recentConnections.length;
+  const rows = feed?.rows ?? [];
+  const unread = feed?.unread ?? 0;
+  const total = unread + soon.length;
 
   return (
     <Popover>
@@ -93,24 +89,47 @@ function Notifications() {
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-0">
-        <div className="border-b border-border px-4 py-3">
-          <p className="text-sm font-semibold">Needs your attention</p>
-          <p className="text-xs text-muted-foreground">
-            No streaks, no nudges to open the app.
-          </p>
+        <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+          <div>
+            <p className="text-sm font-semibold">Updates</p>
+            <p className="text-xs text-muted-foreground">
+              No streaks, no nudges to open the app.
+            </p>
+          </div>
+          {unread > 0 ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 gap-1 px-2 text-[11px]"
+              onClick={() => void markAllRead({})}
+            >
+              <CheckCheck className="size-3" /> Read all
+            </Button>
+          ) : null}
         </div>
-        <div className="max-h-80 overflow-auto p-2">
-          {pendingHosting.map((row) => (
+        <div className="max-h-96 overflow-auto p-2">
+          {rows.map((row) => (
             <Link
-              key={row.activity._id}
-              to={`/activity/${row.activity._id}`}
+              key={row._id}
+              to={row.href ?? "/discover"}
+              onClick={() => {
+                if (!row.read) void markRead({ notificationId: row._id });
+              }}
               className="flex items-start gap-3 rounded-lg px-3 py-2.5 hover:bg-muted"
             >
-              <span className="mt-1 size-1.5 shrink-0 rounded-full bg-primary" />
-              <span className="text-sm">
-                <span className="font-medium">{row.pendingCount} join request{row.pendingCount === 1 ? "" : "s"}</span>
-                <span className="block text-xs text-muted-foreground">
-                  {row.activity.title}
+              <span
+                className={cn(
+                  "mt-1.5 size-1.5 shrink-0 rounded-full",
+                  row.read ? "bg-border" : "bg-primary",
+                )}
+              />
+              <span className="min-w-0 text-sm">
+                <span className="block font-medium">{row.title}</span>
+                <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                  {row.body}
+                </span>
+                <span className="mt-1 block text-[10px] text-muted-foreground/80">
+                  {timeAgo(row.createdAt)}
                 </span>
               </span>
             </Link>
@@ -130,22 +149,7 @@ function Notifications() {
               </span>
             </Link>
           ))}
-          {recentConnections.map((row) => (
-            <Link
-              key={row._id}
-              to="/connections"
-              className="flex items-start gap-3 rounded-lg px-3 py-2.5 hover:bg-muted"
-            >
-              <span className="mt-1 size-1.5 shrink-0 rounded-full bg-[oklch(0.65_0.1_85)]" />
-              <span className="text-sm">
-                <span className="font-medium">New connection</span>
-                <span className="block text-xs text-muted-foreground">
-                  You and {shortName(row.person.displayName)} both said yes
-                </span>
-              </span>
-            </Link>
-          ))}
-          {total === 0 ? (
+          {total === 0 && rows.length === 0 ? (
             <p className="px-3 py-6 text-center text-xs text-muted-foreground">
               Nothing needs your attention. Go live your life.
             </p>

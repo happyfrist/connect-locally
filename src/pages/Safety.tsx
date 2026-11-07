@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useAuth } from "@/hooks/use-auth";
@@ -23,6 +24,7 @@ import {
   Flag,
   Loader2,
   Lock,
+  Mail,
   Phone,
   ShieldCheck,
   Trash2,
@@ -36,14 +38,18 @@ export default function Safety() {
   const reports = useQuery(api.safety.myReports);
   const blocked = useQuery(api.safety.blockedList);
   const exportData = useQuery(api.profiles.exportMyData);
+  const me = useQuery(api.profiles.me);
+  const config = useQuery(api.config.appConfig);
   const unblock = useMutation(api.safety.unblock);
   const deleteMyData = useMutation(api.profiles.deleteMyData);
+  const setEmailNotifications = useMutation(api.profiles.setEmailNotifications);
   const { signOut } = useAuth();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletePhrase, setDeletePhrase] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [unblocking, setUnblocking] = useState<string | null>(null);
+  const [savingEmail, setSavingEmail] = useState(false);
 
   const nextPlan =
     [...(plans?.upcoming ?? []), ...(plans?.hosting ?? [])].sort(
@@ -87,6 +93,22 @@ export default function Safety() {
       toast.error(error instanceof Error ? error.message : "Could not unblock.");
     } finally {
       setUnblocking(null);
+    }
+  };
+
+  const toggleEmail = async (enabled: boolean) => {
+    setSavingEmail(true);
+    try {
+      await setEmailNotifications({ enabled });
+      toast.success(
+        enabled
+          ? "Email updates enabled. You can turn them off here anytime."
+          : "Email updates turned off. In-app updates stay on.",
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save that preference.");
+    } finally {
+      setSavingEmail(false);
     }
   };
 
@@ -218,6 +240,48 @@ export default function Safety() {
             will appear here.
           </p>
         )}
+      </section>
+
+      <section className="mt-4 rounded-2xl border border-border bg-card p-5">
+        <div className="flex items-center gap-2">
+          <Mail className="size-4 text-primary" />
+          <h2 className="font-display text-xl">Email updates</h2>
+        </div>
+        <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+          In-app updates are always on. Email is optional and off by default. When
+          enabled, Connectmaxxing sends transactional messages about join requests,
+          approvals, plan changes, cancellations and mutual connections. No
+          marketing, digests or re-engagement nudges.
+        </p>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-background/60 px-4 py-3">
+          <div>
+            <p className="text-sm font-medium">Transactional email</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {me?.emailAvailable
+                ? "Sent only for things you're already part of."
+                : "Requires an email sign-in; guest accounts cannot receive email."}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {savingEmail ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+            <Switch
+              checked={me?.emailNotificationsEnabled ?? false}
+              onCheckedChange={(checked) => void toggleEmail(checked)}
+              disabled={
+                savingEmail ||
+                !me?.emailAvailable ||
+                config?.emailNotificationsAvailable === false
+              }
+              aria-label="Enable transactional email updates"
+            />
+          </div>
+        </div>
+        {config?.emailNotificationsAvailable === false ? (
+          <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+            Email delivery is not configured on this deployment, so the switch is
+            disabled. In-app updates still work.
+          </p>
+        ) : null}
       </section>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">

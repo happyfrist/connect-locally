@@ -11,6 +11,7 @@ import {
   publicProfile,
   requireProfile,
 } from "./lib/auth";
+import { notifyUser } from "./lib/notify";
 import { circleKindValidator } from "./schema";
 
 const joinPolicyValidator = v.union(v.literal("open"), v.literal("request"));
@@ -249,7 +250,7 @@ export const create = mutation({
 export const join = mutation({
   args: { circleId: v.id("circles") },
   handler: async (ctx, args) => {
-    const { userId } = await requireProfile(ctx);
+    const { userId, profile } = await requireProfile(ctx);
     await enforceRateLimit(ctx, userId, "circle:join", 20, 24 * 60 * 60_000);
     const circle = await ctx.db.get(args.circleId);
     if (!circle) throw new Error("That circle no longer exists.");
@@ -274,12 +275,23 @@ export const join = mutation({
     }
 
     const status = circle.joinPolicy === "open" ? "approved" : "pending";
-    await ctx.db.insert("circleMembers", {
+    const membershipId = await ctx.db.insert("circleMembers", {
       circleId: args.circleId,
       userId,
       role: "member",
       status,
       joinedAt: Date.now(),
+    });
+    await notifyUser(ctx, {
+      recipientId: circle.hostId,
+      kind: status === "pending" ? "circle_request" : "circle_member",
+      title: status === "pending" ? "New circle request" : "New circle member",
+      body:
+        status === "pending"
+          ? `${profile.displayName} asked to join ${circle.name}.`
+          : `${profile.displayName} joined ${circle.name}.`,
+      href: `/circles/${args.circleId}`,
+      dedupeKey: `circle-join:${membershipId}:${circle.hostId}`,
     });
     return status;
   },
@@ -292,7 +304,7 @@ export const decideMember = mutation({
     decision: v.union(v.literal("approved"), v.literal("declined")),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireProfile(ctx);
+    const { userId, profile } = await requireProfile(ctx);
     await enforceRateLimit(ctx, userId, "circle:decide", 300, 24 * 60 * 60_000);
     const circle = await ctx.db.get(args.circleId);
     if (!circle) throw new Error("That circle no longer exists.");
@@ -307,6 +319,14 @@ export const decideMember = mutation({
     }
     if (args.decision === "declined") {
       await ctx.db.delete(args.requestId);
+      await notifyUser(ctx, {
+        recipientId: membership.userId,
+        kind: "circle_declined",
+        title: "Circle request update",
+        body: `${profile.displayName} declined your request to join ${circle.name}.`,
+        href: "/circles",
+        dedupeKey: `circle-decision:${args.requestId}:declined:${membership.userId}`,
+      });
       return;
     }
     const members = await membersOf(ctx, circle._id);
@@ -315,6 +335,14 @@ export const decideMember = mutation({
       throw new Error("This circle is full.");
     }
     await ctx.db.patch(args.requestId, { status: "approved" });
+    await notifyUser(ctx, {
+      recipientId: membership.userId,
+      kind: "circle_approved",
+      title: "You're in the circle",
+      body: `${profile.displayName} approved your request to join ${circle.name}.`,
+      href: `/circles/${args.circleId}`,
+      dedupeKey: `circle-decision:${args.requestId}:approved:${membership.userId}`,
+    });
   },
 });
 

@@ -122,6 +122,8 @@ const schema = defineSchema(
       // end to end without pretending a real person consented.
       openToReconnect: v.optional(v.boolean()),
       hidden: v.optional(v.boolean()),
+      // Transactional email is opt-in. Absent/false means in-app only.
+      notifyByEmail: v.optional(v.boolean()),
     })
       .index("by_user", ["userId"])
       .index("by_city", ["city"]),
@@ -323,6 +325,46 @@ const schema = defineSchema(
     })
       .index("by_user", ["userId"])
       .index("by_status", ["status"]),
+
+    notifications: defineTable({
+      userId: v.id("users"),
+      kind: v.string(),
+      title: v.string(),
+      body: v.string(),
+      href: v.optional(v.string()),
+      dedupeKey: v.string(),
+      readAt: v.optional(v.number()),
+      createdAt: v.number(),
+    })
+      .index("by_user_created", ["userId", "createdAt"])
+      .index("by_dedupe", ["dedupeKey"]),
+
+    // Transactional email is written transactionally, then delivered by a
+    // scheduled action. A provider failure never rolls back the product action
+    // or pretends the email was sent.
+    emailOutbox: defineTable({
+      recipientId: v.id("users"),
+      kind: v.string(),
+      dedupeKey: v.string(),
+      subject: v.string(),
+      html: v.string(),
+      text: v.string(),
+      status: v.union(
+        v.literal("pending"),
+        v.literal("sending"),
+        v.literal("sent"),
+        v.literal("failed"),
+        v.literal("skipped"),
+      ),
+      attempts: v.number(),
+      lastError: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+      sentAt: v.optional(v.number()),
+    })
+      .index("by_recipient", ["recipientId"])
+      .index("by_status", ["status"])
+      .index("by_dedupe", ["dedupeKey"]),
 
     demoSeed: defineTable({
       key: v.string(),

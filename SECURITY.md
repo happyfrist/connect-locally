@@ -44,8 +44,9 @@ See [PRIVACY.md](./PRIVACY.md#5-security-controls-present) for the implemented c
 - Deletion revokes auth sessions, refresh tokens, provider accounts and verification codes before scheduling resumable product-record cleanup.
 - Public profile shapes are allow-listed.
 - Demo seeding and demo consent are opt-in through `ALLOW_DEMO_SEED`; production defaults to off.
+- Transactional email is opt-in, queued server-side in `emailOutbox`, and delivered by a scheduled action that re-checks account status and the opt-in before sending. Demo profiles, guests and deleted/disabled accounts are skipped.
 - Sensitive mutations have fixed-window rate limits. Convex Auth provides the sign-in/OTP attempt limit.
-- No service-role or provider secret exists in client code.
+- No service-role or provider secret exists in client code. The gateway key is read only inside a Convex action.
 
 ## Automated security tests
 
@@ -61,13 +62,15 @@ See [PRIVACY.md](./PRIVACY.md#5-security-controls-present) for the implemented c
 - Reports are reason-allow-listed and throttled.
 - Demo seeding is off by default.
 - Export includes only the member's own private answers.
-- Deletion revokes auth records synchronously and removes product records through the resumable worker, while retaining the moderation report.
+- Deletion revokes auth records synchronously and removes product records, in-app notifications and queued email through the resumable worker, while retaining the moderation report.
+- Email delivery is tested against a mocked gateway response (endpoint, bearer header, recipient, subject and status transition); no live email is sent by the test suite.
+- Approval after a plan has started is refused; the requester receives an in-app/optional email decision update.
 
 ## Before a public pilot
 
 1. Independent authorization review of every Convex function.
 2. Abuse testing: enumeration, capacity races, duplicate requests, report spam, credential stuffing.
-3. Dependency and secret scanning in CI.
+3. Dependency and secret scanning in CI (the new GitHub Actions workflow runs lint/tests but not security scanners yet).
 4. Platform-level rate limiting, monitoring and alerting.
 5. A documented incident-response owner, channel and timeline.
 6. Legal review of privacy notices and intermediary obligations.

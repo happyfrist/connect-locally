@@ -11,6 +11,7 @@ import {
   publicProfile,
   requireProfile,
 } from "./lib/auth";
+import { notifyUser } from "./lib/notify";
 import { checkInState, reconnectState } from "./lib/policy";
 import { recurrenceValidator } from "./schema";
 
@@ -442,7 +443,7 @@ export const requestJoin = mutation({
     message: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireProfile(ctx);
+    const { userId, profile } = await requireProfile(ctx);
     await enforceRateLimit(ctx, userId, "activity:join", 30, 24 * 60 * 60_000);
     const activity = await ctx.db.get(args.activityId);
     if (!activity) throw new Error("That plan no longer exists.");
@@ -484,6 +485,7 @@ export const requestJoin = mutation({
     }
 
     const status = activity.autoApprove ? "approved" : "pending";
+    let requestId: Id<"joinRequests">;
     if (existing) {
       await ctx.db.patch(existing._id, {
         status,
@@ -491,14 +493,25 @@ export const requestJoin = mutation({
         createdAt: Date.now(),
         decidedAt: activity.autoApprove ? Date.now() : undefined,
       });
+      requestId = existing._id;
     } else {
-      await ctx.db.insert("joinRequests", {
+      requestId = await ctx.db.insert("joinRequests", {
         activityId: args.activityId,
         userId,
         status,
         message: args.message?.trim() || undefined,
         createdAt: Date.now(),
         decidedAt: activity.autoApprove ? Date.now() : undefined,
+      });
+    }
+    if (status === "pending") {
+      await notifyUser(ctx, {
+        recipientId: activity.hostId,
+        kind: "join_request",
+        title: "New join request",
+        body: `${profile.displayName} asked to join ${activity.title}. Review the request when you can.`,
+        href: `/activity/${args.activityId}`,
+        dedupeKey: `join:${requestId}:${activity.hostId}`,
       });
     }
     return status;
@@ -511,7 +524,7 @@ export const decideRequest = mutation({
     decision: v.union(v.literal("approved"), v.literal("declined")),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireProfile(ctx);
+    const { userId, profile } = await requireProfile(ctx);
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("That request no longer exists.");
     const activity = await ctx.db.get(request.activityId);
@@ -519,6 +532,9 @@ export const decideRequest = mutation({
     if (activity.status === "cancelled") throw new Error("This plan has been cancelled.");
     if (activity.hostId !== userId) throw new Error("Only the host can decide requests.");
     if (request.status !== "pending") throw new Error("This request was already handled.");
+    if (activity.startsAt <= Date.now()) {
+      throw new Error("This plan has already started. Requests can no longer be decided.");
+    }
     if (await isBlockedPair(ctx, userId, request.userId)) {
       throw new Error("That request is no longer available.");
     }
@@ -534,6 +550,17 @@ export const decideRequest = mutation({
     await ctx.db.patch(args.requestId, {
       status: args.decision,
       decidedAt: Date.now(),
+    });
+    await notifyUser(ctx, {
+      recipientId: request.userId,
+      kind: `join_${args.decision}`,
+      title: args.decision === "approved" ? "You're in" : "Request update",
+      body:
+        args.decision === "approved"
+          ? `${profile.displayName} approved your request to join ${activity.title}.`
+          : `${profile.displayName} declined your request to join ${activity.title}. You can find another plan in Discover.`,
+      href: `/activity/${activity._id}`,
+      dedupeKey: `decision:${request._id}:${args.decision}:${request.userId}`,
     });
     return args.decision;
   },
@@ -559,15 +586,16 @@ export const withdraw = mutation({
 export const cancel = mutation({
   args: { activityId: v.id("activities"), reason: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const { userId } = await requireProfile(ctx);
+    const { userId, profile } = await requireProfile(ctx);
     const activity = await ctx.db.get(args.activityId);
     if (!activity) throw new Error("That plan no longer exists.");
     if (activity.hostId !== userId) throw new Error("Only the host can cancel this plan.");
     if (activity.status === "cancelled") return;
 
+    const reason = args.reason?.trim().slice(0, 500) || "The host cancelled this plan.";
     await ctx.db.patch(args.activityId, {
       status: "cancelled",
-      cancelReason: args.reason?.trim() || "The host cancelled this plan.",
+      cancelReason: reason,
     });
     const requests = await approvedRequests(ctx, activity._id);
     for (const request of requests) {
@@ -575,6 +603,19 @@ export const cancel = mutation({
         await ctx.db.patch(request._id, {
           status: "declined",
           decidedAt: Date.now(),
+        });
+      }
+      if (
+        (request.status === "approved" || request.status === "pending") &&
+        request.userId !== userId
+      ) {
+        await notifyUser(ctx, {
+          recipientId: request.userId,
+          kind: "plan_cancelled",
+          title: "Plan cancelled",
+          body: `${profile.displayName} cancelled ${activity.title}. Reason: ${reason}`,
+          href: `/activity/${activity._id}`,
+          dedupeKey: `cancel:${activity._id}:${request.userId}`,
         });
       }
     }
@@ -589,16 +630,32 @@ export const postUpdate = mutation({
     const activity = await ctx.db.get(args.activityId);
     if (!activity) throw new Error("That plan no longer exists.");
     if (activity.hostId !== userId) throw new Error("Only the host can post updates.");
+    if (activity.status === "cancelled") {
+      throw new Error("Cancelled plans can't receive updates.");
+    }
     const body = args.body.trim();
     if (body.length < 3 || body.length > 500) {
       throw new Error("Updates should be between 3 and 500 characters.");
     }
-    await ctx.db.insert("activityUpdates", {
+    const updateId = await ctx.db.insert("activityUpdates", {
       activityId: args.activityId,
       authorId: userId,
       body,
       createdAt: Date.now(),
     });
+
+    const requests = await approvedRequests(ctx, activity._id);
+    for (const request of requests) {
+      if (request.status !== "approved" || request.userId === userId) continue;
+      await notifyUser(ctx, {
+        recipientId: request.userId,
+        kind: "plan_update",
+        title: "Update to your plan",
+        body: `${activity.title}: ${body}`,
+        href: `/activity/${activity._id}`,
+        dedupeKey: `update:${updateId}:${request.userId}`,
+      });
+    }
   },
 });
 
@@ -750,7 +807,7 @@ export const myPlans = query({
     const hostedUpcoming: PlanCard[] = [];
     const hostedPast: PlanCard[] = [];
     for (const activity of hosted) {
-      (activity.startsAt >= now || activity.status === "open"
+      (activity.startsAt >= now && activity.status === "open"
         ? hostedUpcoming
         : hostedPast
       ).push(await decorateHosted(activity));

@@ -18,6 +18,7 @@ async function makeUser(
     role?: "member" | "moderator" | "admin";
     status?: "active" | "disabled";
     anonymous?: boolean;
+    notifyByEmail?: boolean;
   } = {},
 ) {
   return (await t.run(async (ctx) => {
@@ -45,6 +46,7 @@ async function makeUser(
       onboardingComplete: true,
       isDemo: false,
       hidden: opts.hidden ?? false,
+      notifyByEmail: opts.notifyByEmail ?? false,
     });
     return userId as Id<"users">;
   })) as Id<"users">;
@@ -503,6 +505,285 @@ describe("attendance and mutual reconnection", () => {
         decision: "yes",
       }),
     ).rejects.toThrow(/isn't available/);
+  });
+});
+
+describe("notifications and request integrity", () => {
+  it("always creates an in-app update but emails only after explicit opt-in", async () => {
+    const t = convexTest(schema, modules);
+    const host = await makeUser(t, "Host", "notify-host@example.test");
+    const guest = await makeUser(t, "Guest", "notify-guest@example.test");
+    const activityId = await makeActivity(t, host);
+
+    await as(t, guest).mutation(api.activities.requestJoin, {
+      activityId,
+      message: "I would like to join.",
+    });
+
+    let state = await t.run(async (ctx) => ({
+      notifications: await ctx.db.query("notifications").collect(),
+      outbox: await ctx.db.query("emailOutbox").collect(),
+    }));
+    expect(state.notifications).toHaveLength(1);
+    expect(state.notifications[0]).toMatchObject({
+      userId: host,
+      kind: "join_request",
+    });
+    expect(state.notifications[0].readAt).toBeUndefined();
+    expect(state.outbox).toHaveLength(0);
+
+    await as(t, host).mutation(api.profiles.setEmailNotifications, {
+      enabled: true,
+    });
+    const me = await as(t, host).query(api.profiles.me, {});
+    expect(me).toMatchObject({
+      emailNotificationsEnabled: true,
+      emailAvailable: true,
+    });
+
+    // A second event queues exactly one email. The first event stays in-app
+    // only because it happened before the member opted in.
+    const secondActivity = await makeActivity(t, host, {
+      title: "Second public walk",
+      startsAt: Date.now() + 48 * 60 * 60_000,
+    });
+    await as(t, guest).mutation(api.activities.requestJoin, {
+      activityId: secondActivity,
+    });
+
+    state = await t.run(async (ctx) => ({
+      notifications: await ctx.db.query("notifications").collect(),
+      outbox: await ctx.db.query("emailOutbox").collect(),
+    }));
+    expect(state.notifications).toHaveLength(2);
+    expect(state.outbox).toHaveLength(1);
+    expect(state.outbox[0]).toMatchObject({
+      recipientId: host,
+      status: "pending",
+      attempts: 0,
+    });
+    expect(state.outbox[0].subject).toContain("New join request");
+    expect(state.outbox[0].html).toContain("Second public walk");
+  });
+
+  it("deduplicates repeated request events and removes queued email on deletion", async () => {
+    const t = convexTest(schema, modules);
+    const host = await makeUser(t, "Host", "notify-delete-host@example.test", {
+      notifyByEmail: true,
+    });
+    const guest = await makeUser(t, "Guest", "notify-delete-guest@example.test");
+    const activityId = await makeActivity(t, host);
+
+    await as(t, guest).mutation(api.activities.requestJoin, { activityId });
+    await as(t, guest).mutation(api.activities.withdraw, { activityId });
+    await as(t, guest).mutation(api.activities.requestJoin, { activityId });
+
+    const beforeDelete = await t.run(async (ctx) => ({
+      notifications: await ctx.db.query("notifications").collect(),
+      outbox: await ctx.db.query("emailOutbox").collect(),
+    }));
+    expect(beforeDelete.notifications).toHaveLength(1);
+    expect(beforeDelete.outbox).toHaveLength(1);
+
+    vi.useFakeTimers();
+    try {
+      await as(t, host).mutation(api.profiles.deleteMyData, {});
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const afterDelete = await t.run(async (ctx) => ({
+      notifications: await ctx.db.query("notifications").collect(),
+      outbox: await ctx.db.query("emailOutbox").collect(),
+    }));
+    expect(afterDelete.notifications).toEqual([]);
+    expect(afterDelete.outbox).toEqual([]);
+  });
+
+  it("sends a queued email through the real gateway endpoint", async () => {
+    const t = convexTest(schema, modules);
+    const host = await makeUser(t, "Host", "gateway-host@example.test", {
+      notifyByEmail: true,
+    });
+    const guest = await makeUser(t, "Guest", "gateway-guest@example.test");
+    const activityId = await makeActivity(t, host, {
+      title: "Gateway walk",
+    });
+    await as(t, guest).mutation(api.activities.requestJoin, { activityId });
+    const job = await t.run(async (ctx) =>
+      ctx.db.query("emailOutbox").unique(),
+    );
+    if (!job) throw new Error("Expected a queued email.");
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "email_test_1", status: "sent" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubEnv("VLY_INTEGRATION_KEY", "test_gateway_key");
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await t.action(internal.notifications.sendEmailJob, {
+        jobId: job._id,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://integrations.vly.ai/v1/email/send");
+    expect(init.method).toBe("POST");
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer test_gateway_key",
+      "X-Vly-Version": "0.1.0",
+    });
+    const body = JSON.parse(String(init.body)) as {
+      to: string[];
+      subject: string;
+      html: string;
+    };
+    expect(body.to).toEqual(["gateway-host@example.test"]);
+    expect(body.subject).toContain("New join request");
+    expect(body.html).toContain("Gateway walk");
+
+    const delivered = await t.run(async (ctx) => ctx.db.get(job._id));
+    expect(delivered).toMatchObject({ status: "sent", attempts: 1 });
+  });
+
+  it("records a gateway rejection instead of marking the email sent", async () => {
+    const t = convexTest(schema, modules);
+    const host = await makeUser(t, "Host", "gateway-fail-host@example.test", {
+      notifyByEmail: true,
+    });
+    const guest = await makeUser(t, "Guest", "gateway-fail-guest@example.test");
+    const activityId = await makeActivity(t, host);
+    await as(t, guest).mutation(api.activities.requestJoin, { activityId });
+    const job = await t.run(async (ctx) =>
+      ctx.db.query("emailOutbox").unique(),
+    );
+    if (!job) throw new Error("Expected a queued email.");
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: false,
+          status: "failed",
+          error: "Sender domain is not verified",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubEnv("VLY_INTEGRATION_KEY", "test_gateway_key");
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await t.action(internal.notifications.sendEmailJob, {
+        jobId: job._id,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+
+    const failed = await t.run(async (ctx) => ctx.db.get(job._id));
+    expect(failed).toMatchObject({ status: "failed", attempts: 1 });
+    expect(failed?.lastError).toContain("Sender domain is not verified");
+  });
+
+  it("skips a queued email when the member opts out before delivery", async () => {
+    const t = convexTest(schema, modules);
+    const host = await makeUser(t, "Host", "optout-host@example.test", {
+      notifyByEmail: true,
+    });
+    const guest = await makeUser(t, "Guest", "optout-guest@example.test");
+    const activityId = await makeActivity(t, host);
+    await as(t, guest).mutation(api.activities.requestJoin, { activityId });
+    const job = await t.run(async (ctx) =>
+      ctx.db.query("emailOutbox").unique(),
+    );
+    if (!job) throw new Error("Expected a queued email.");
+
+    await as(t, host).mutation(api.profiles.setEmailNotifications, {
+      enabled: false,
+    });
+
+    const fetchMock = vi.fn();
+    vi.stubEnv("VLY_INTEGRATION_KEY", "test_gateway_key");
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await t.action(internal.notifications.sendEmailJob, {
+        jobId: job._id,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const skipped = await t.run(async (ctx) => ctx.db.get(job._id));
+    expect(skipped).toMatchObject({ status: "skipped", attempts: 0 });
+  });
+
+  it("notifies the requester about a decision and refuses decisions after start", async () => {
+    const t = convexTest(schema, modules);
+    const host = await makeUser(t, "Host", "decision-host@example.test");
+    const guest = await makeUser(t, "Guest", "decision-guest@example.test", {
+      notifyByEmail: true,
+    });
+    const activityId = await makeActivity(t, host);
+    await as(t, guest).mutation(api.activities.requestJoin, { activityId });
+    const request = await t.run(async (ctx) =>
+      ctx.db
+        .query("joinRequests")
+        .withIndex("by_activity_user", (q) =>
+          q.eq("activityId", activityId).eq("userId", guest),
+        )
+        .unique(),
+    );
+    if (!request) throw new Error("Expected a pending join request.");
+
+    await as(t, host).mutation(api.activities.decideRequest, {
+      requestId: request._id,
+      decision: "approved",
+    });
+    const state = await t.run(async (ctx) => ({
+      notifications: await ctx.db.query("notifications").collect(),
+      outbox: await ctx.db.query("emailOutbox").collect(),
+    }));
+    expect(
+      state.notifications.some(
+        (row) => row.userId === guest && row.kind === "join_approved",
+      ),
+    ).toBe(true);
+    expect(state.outbox.some((row) => row.recipientId === guest)).toBe(true);
+
+    const lateActivity = await makeActivity(t, host, {
+      startsAt: Date.now() + 60 * 60_000,
+    });
+    await as(t, guest).mutation(api.activities.requestJoin, {
+      activityId: lateActivity,
+    });
+    const lateRequest = await t.run(async (ctx) =>
+      ctx.db
+        .query("joinRequests")
+        .withIndex("by_activity_user", (q) =>
+          q.eq("activityId", lateActivity).eq("userId", guest),
+        )
+        .unique(),
+    );
+    if (!lateRequest) throw new Error("Expected a pending late request.");
+    await t.run(async (ctx) => {
+      await ctx.db.patch(lateActivity, { startsAt: Date.now() - 60_000 });
+    });
+    await expect(
+      as(t, host).mutation(api.activities.decideRequest, {
+        requestId: lateRequest._id,
+        decision: "approved",
+      }),
+    ).rejects.toThrow(/already started/);
   });
 });
 

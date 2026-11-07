@@ -20,6 +20,7 @@ Connectmaxxing coordinates strangers meeting in physical locations. That is the 
 
 - Self check-in is available from 30 minutes before the start until 24 hours after the scheduled end, only for approved participants and the host. Cancelled plans cannot record attendance.
 - Hosts can post updates, cancel with a reason, and see who is coming. Hosts check in like everyone else before they can reconnect.
+- Participants receive an in-app update for approvals, decisions, plan changes, cancellations and mutual connections. Email is opt-in and transactional only; there are no marketing or re-engagement emails.
 - Reconnection opens only after the plan has ended, is available for 14 days, and is never available for a cancelled plan.
 - After checking in, each attendee can privately answer *yes / maybe / no* about seeing each other person again.
 - A **connection requires two independent yes answers**. A one-sided answer is never returned to the other person; a "maybe" is never surfaced.
@@ -32,7 +33,7 @@ Connectmaxxing coordinates strangers meeting in physical locations. That is the 
 - Reports are visible only to the reporter (status) and to a role-restricted moderator queue (details).
 - Duplicate open reports on the same target by the same reporter are collapsed.
 - Moderators can mark a report reviewing/resolved/dismissed, warn, cancel a plan, restrict a circle to request-only, or disable the responsible account (which also revokes its sessions). Every decision is written to `auditLog` with the moderator's user id.
-- A report's internal note is never shown to the reporter or the reported member.
+- A report's internal note is never shown to the reporter or the reported member. The reporter gets an in-app outcome notification when a report is resolved or dismissed.
 - Moderator roles cannot be claimed from the public app. The deployment owner grants them through a trusted internal procedure.
 
 ### First-timer support
@@ -56,6 +57,7 @@ Connectmaxxing coordinates strangers meeting in physical locations. That is the 
 | Age assurance | The 18+ gate is still self-declared; no provider, document check or proportionality review exists. |
 | Affinity-group policy | The data model could support women-only or other groups, but eligibility rules, moderation and legal review are not built. |
 | Recurring occurrence generation | `recurrence` is descriptive. The app does not automatically create future occurrences. |
+| Email deliverability and bounce handling | Opt-in transactional email is wired to the gateway, but bounce/complaint handling, a verified sending domain and live delivery testing are not established. |
 
 ## 3. Emergency guidance
 

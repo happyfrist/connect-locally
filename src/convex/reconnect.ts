@@ -10,6 +10,7 @@ import {
   publicProfile,
   requireProfile,
 } from "./lib/auth";
+import { notifyUser } from "./lib/notify";
 import { demoSeedEnabled, reconnectState } from "./lib/policy";
 import { reconnectDecisionValidator } from "./schema";
 
@@ -24,7 +25,7 @@ export const decide = mutation({
     decision: reconnectDecisionValidator,
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireProfile(ctx);
+    const { userId, profile } = await requireProfile(ctx);
     await enforceRateLimit(ctx, userId, "reconnect:decide", 200, 24 * 60 * 60_000);
     if (args.targetId === userId) throw new Error("You can't reconnect with yourself.");
     const activity = await ctx.db.get(args.activityId);
@@ -130,11 +131,27 @@ export const decide = mutation({
       const already = await connectionExists(ctx, userId, args.targetId);
       if (!already) {
         const [userA, userB] = [userId, args.targetId].sort() as Id<"users">[];
-        await ctx.db.insert("connections", {
+        const connectionId = await ctx.db.insert("connections", {
           userA,
           userB,
           activityId: args.activityId,
           createdAt: Date.now(),
+        });
+        await notifyUser(ctx, {
+          recipientId: userId,
+          kind: "connection",
+          title: "You're connected",
+          body: `You and ${targetProfile.displayName} both chose to reconnect after ${activity.title}.`,
+          href: "/connections",
+          dedupeKey: `connection:${connectionId}:${userId}`,
+        });
+        await notifyUser(ctx, {
+          recipientId: args.targetId,
+          kind: "connection",
+          title: "You're connected",
+          body: `You and ${profile.displayName} both chose to reconnect after ${activity.title}.`,
+          href: "/connections",
+          dedupeKey: `connection:${connectionId}:${args.targetId}`,
         });
       }
       return { connected: true, mutual: true };

@@ -29,9 +29,21 @@
 - Demo seeding and demo reconnection consent require `ALLOW_DEMO_SEED=true`; production defaults to off.
 - Anonymous guest accounts are refused by all product functions unless `ALLOW_GUEST_DEMO=true`; production requires an email-verified account. The guest button is hidden when disabled and the false “add an email later” claim was removed.
 
+### Notifications and request integrity (Phase 2)
+
+- Added an in-app notification feed for join requests, decisions, plan updates, cancellations, circle membership decisions, mutual connections and report outcomes, with member-scoped read state.
+- Added **opt-in** transactional email through the real `/v1/email/send` integration gateway. Email is off by default, has no marketing/digest use, re-checks opt-in and account status at delivery, and records failures without claiming success.
+- Added a transactional email outbox with idempotent per-event dedupe keys, plus `APP_BASE_URL`/`NOTIFICATION_FROM_EMAIL` deployment settings. No deep link is invented when `APP_BASE_URL` is absent.
+- Host approval now refuses requests after the plan has started; the requester receives a decision notification.
+- Cancelled plans reject host updates. Hosted cancelled plans are no longer grouped as upcoming.
+- Onboarding only promises demo content when the deployment actually enables demo seeding.
+- The Safety centre now exposes the email opt-in with an honest “not configured” state when the gateway key is absent.
+- Account deletion removes in-app notifications and queued email as part of the resumable worker.
+- Added a GitHub Actions verification workflow (typecheck, lint, tests), made generated Convex bindings trackable and ignored local `.env*` files so credentials are not added to a future commit.
+
 ### Testing and tooling
 
-- Added `convex-test` + Vitest backend integration tests with independent identities (14 tests).
+- Added `convex-test` + Vitest backend integration tests with independent identities (20 tests), including delivery-time email opt-out, the gateway payload/rejection path and approval-after-start guard.
 - Added pure policy tests for check-in/reconnect windows, rate buckets and demo/guest gating (7 tests).
 - Upgraded `convex` to 1.48.0 for the test harness.
 - Fixed all ESLint errors across the repository; remaining warnings are Fast Refresh hints in generated/shadcn files.
@@ -63,7 +75,7 @@
 
 ### Known gaps
 
-- No direct messaging, photos, push notifications, maps, payments or identity verification.
+- No direct messaging, photos, push notifications, maps, payments or identity verification. Transactional email exists but there are no digests or reminders.
 - No automatic recurring event occurrences.
 - No integration/E2E test harness, load testing or device matrix.
 - Legal review, moderation staffing, grievance channel and pilot operations are not complete.

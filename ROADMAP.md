@@ -20,7 +20,7 @@ These are launch blockers, not stretch goals.
 - **E2E journeys** with two accounts in a real browser: host approval, cancellation, mutual reconnect, block, report → moderation, export/delete.
 - **Platform-level abuse controls**: edge/WAF throttling, monitoring and alerting beyond the app's fixed-window counters; no invasive device fingerprinting.
 - **Recurring occurrences**: the current `recurrence` field is descriptive only. Generate real future occurrences with edit/cancel scope.
-- **Notifications**: approval, change, cancellation, mutual connection and upcoming-plan reminders. Preferences and a quiet-by-default design; no re-engagement nudges.
+- **Notifications**: in-app updates and opt-in transactional email now cover approval, decision, change, cancellation, mutual connection and report outcomes. Remaining: upcoming-plan reminders, bounce/complaint handling, a verified sending domain, richer preferences and delivery monitoring.
 - **Event-scoped communication**: host ↔ attendee coordination and a connection-only conversation, with request controls, mute, block and report. Never unrestricted stranger messaging.
 - **Accessibility audit** against WCAG 2.2 AA, including keyboard navigation, focus management, contrast and reduced motion. Small-Android layout has been designed for, not device-tested.
 - **Data lifecycle**: legally reviewed retention periods, backup policy, export completeness and periodic deletion-worker monitoring. Session revocation and resumable product-record deletion now exist.
@@ -55,10 +55,10 @@ These are launch blockers, not stretch goals.
 
 - No direct messaging, even between connections.
 - No photo uploads or image consent workflow.
-- No push notifications or email digests.
+- No push notifications or email digests. Transactional email is opt-in and not a marketing channel.
 - No map or distance filter beyond city/area.
 - No automatic recurring events.
 - No payments or ticketing.
 - No identity or age verification.
 - No admin web app separate from the member app; moderation is a role-restricted route in the same client.
-- Backend integration tests now cover the highest-risk authorization and lifecycle paths, but there is no browser E2E suite, load test or real-device matrix.
+- Backend integration tests (18) now cover the highest-risk authorization, notification and lifecycle paths, but there is no browser E2E suite, load test or real-device matrix. A GitHub Actions workflow exists in the workspace but has not been run on GitHub from this host.

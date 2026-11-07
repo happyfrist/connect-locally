@@ -100,6 +100,9 @@ export const me = query({
       isModerator: await isModerator(ctx, userId),
       profile: active && profile ? publicProfile(profile) : null,
       onboardingComplete: active && (profile?.onboardingComplete ?? false),
+      emailNotificationsEnabled:
+        active && profile ? profile.notifyByEmail === true : false,
+      emailAvailable: Boolean(user?.email) && !user?.isAnonymous,
     };
   },
 });
@@ -159,6 +162,24 @@ export const update = mutation({
       comfort: args.comfort,
     });
     return userId;
+  },
+});
+
+/** Explicit opt-in for transactional email. In-app notifications stay on. */
+export const setEmailNotifications = mutation({
+  args: { enabled: v.boolean() },
+  handler: async (ctx, args) => {
+    const { userId, profile } = await requireProfile(ctx);
+    if (args.enabled) {
+      const user = await ctx.db.get(userId);
+      if (!user?.email || user.isAnonymous) {
+        throw new Error(
+          "Email updates require a verified email sign-in. Guest accounts cannot receive them.",
+        );
+      }
+    }
+    await ctx.db.patch(profile._id, { notifyByEmail: args.enabled });
+    return args.enabled;
   },
 });
 
@@ -343,7 +364,7 @@ async function stepPersonalRows(
   ctx: MutationCtx,
   userId: Id<"users">,
 ): Promise<boolean> {
-  const [requests, attendance, decisionsFrom, decisionsTo, connectionsA, connectionsB, blocksByMe, blocksOfMe, memberships, journal, updates, circlePosts] =
+  const [requests, attendance, decisionsFrom, decisionsTo, connectionsA, connectionsB, blocksByMe, blocksOfMe, memberships, journal, updates, circlePosts, notifications, emails] =
     await Promise.all([
       ctx.db.query("joinRequests").withIndex("by_user", (q) => q.eq("userId", userId)).take(DELETION_BATCH),
       ctx.db.query("attendance").withIndex("by_user", (q) => q.eq("userId", userId)).take(DELETION_BATCH),
@@ -357,6 +378,8 @@ async function stepPersonalRows(
       ctx.db.query("journalEntries").withIndex("by_user", (q) => q.eq("userId", userId)).take(DELETION_BATCH),
       ctx.db.query("activityUpdates").withIndex("by_author", (q) => q.eq("authorId", userId)).take(DELETION_BATCH),
       ctx.db.query("circlePosts").withIndex("by_author", (q) => q.eq("authorId", userId)).take(DELETION_BATCH),
+      ctx.db.query("notifications").withIndex("by_user_created", (q) => q.eq("userId", userId)).take(DELETION_BATCH),
+      ctx.db.query("emailOutbox").withIndex("by_recipient", (q) => q.eq("recipientId", userId)).take(DELETION_BATCH),
     ]);
 
   const rows = [
@@ -372,6 +395,8 @@ async function stepPersonalRows(
     ...journal,
     ...updates,
     ...circlePosts,
+    ...notifications,
+    ...emails,
   ];
   if (rows.length === 0) return false;
   const seen = new Set<string>();
@@ -400,6 +425,8 @@ async function stillHasData(ctx: MutationCtx, userId: Id<"users">) {
     ctx.db.query("journalEntries").withIndex("by_user", (q) => q.eq("userId", userId)).take(1),
     ctx.db.query("activityUpdates").withIndex("by_author", (q) => q.eq("authorId", userId)).take(1),
     ctx.db.query("circlePosts").withIndex("by_author", (q) => q.eq("authorId", userId)).take(1),
+    ctx.db.query("notifications").withIndex("by_user_created", (q) => q.eq("userId", userId)).take(1),
+    ctx.db.query("emailOutbox").withIndex("by_recipient", (q) => q.eq("recipientId", userId)).take(1),
   ]);
   return checks.some((rows) => rows.length > 0);
 }
@@ -512,6 +539,7 @@ export const exportMyData = query({
       notice:
         "This export contains your own records only. Other members' private reconnect answers and block decisions are never disclosed. Moderation reports and audit entries may be retained after deletion for safety and legal reasons; see PRIVACY.md.",
       profile: profile ? publicProfile(profile) : null,
+      emailNotificationsEnabled: profile?.notifyByEmail === true,
       joinRequests: requests,
       attendance,
       reconnectDecisionsGiven: decisions,

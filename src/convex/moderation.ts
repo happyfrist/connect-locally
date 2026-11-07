@@ -14,6 +14,7 @@ import {
   revokeAuthSessions,
   writeAudit,
 } from "./lib/auth";
+import { notifyUser } from "./lib/notify";
 import { reportStatusValidator } from "./schema";
 
 export const status = query({
@@ -286,6 +287,16 @@ export const resolve = mutation({
       resolvedAt: args.status === "open" || args.status === "reviewing" ? undefined : Date.now(),
       handledBy: moderatorId,
     });
+    if (args.status === "resolved" || args.status === "dismissed") {
+      await notifyUser(ctx, {
+        recipientId: report.reporterId,
+        kind: "report_update",
+        title: "Your report was reviewed",
+        body: `A moderator ${args.status} your report about ${report.targetLabel}. You can see the outcome in the Safety centre.`,
+        href: "/safety",
+        dedupeKey: `report:${report._id}:${args.status}:${report.reporterId}`,
+      });
+    }
     await writeAudit(
       ctx,
       moderatorId,

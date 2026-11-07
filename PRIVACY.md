@@ -16,6 +16,9 @@ This document describes what the prototype stores, who can see it, and what stil
 | Blocks | Protect members | The blocker | Enforced both ways server-side |
 | Reports | Safety review | Reporter (status only), moderators (details) | Never shown to the reported member |
 | Moderator audit log | Accountability | Moderators | Actor, action, target, note |
+| In-app notifications | Tell a member about a request, decision, change, cancellation, connection or report outcome | The recipient only | Removed during account deletion |
+| Email update preference | Remember whether the member opted in | The member; server-side delivery action | Off by default |
+| Email delivery queue | Deliver a transactional update after opt-in | Server-side email gateway | Contains the message content; no separate copy of the recipient address; removed during account deletion |
 | Demo seed markers | Idempotent sample data | No one | Contains city and member ids |
 
 ### Not collected
@@ -35,11 +38,13 @@ This document describes what the prototype stores, who can see it, and what stil
 - **Block/unblock:** from a plan or the safety centre. Blocking also ends an existing connection.
 - **Journal:** edit or delete any entry.
 - **Profile:** edit all profile fields from the shell.
+- **Email updates:** opt in or out from the Safety centre. In-app notifications remain enabled; email is not used for marketing or re-engagement.
 
 ### Deletion behavior and retention exceptions
 
 - Sign-in sessions, refresh tokens, provider accounts and pending verification codes are deleted synchronously when deletion starts. An already-issued access token cannot use product functions because every function checks `accountStatus` and refuses `deleting`/`deleted` accounts.
-- Product records are removed by a scheduled, indexed, resumable job in small batches, so a large history does not need to fit in one database transaction. The job is idempotent and revokes auth again on each run.
+- Product records, in-app notifications and queued email are removed by a scheduled, indexed, resumable job in small batches, so a large history does not need to fit in one database transaction. The job is idempotent and revokes auth again on each run.
+- **Already-sent email cannot be recalled.** A message delivered before deletion remains in the recipient's inbox and the email provider's systems. Queued messages that have not been claimed are deleted or skipped.
 - **Retained:** moderation reports and the moderator audit log. These are kept as an unidentified safety record with the tombstone user id, not an email. Deleting them would destroy evidence needed for safety, legal or appeal processes. The retention period is **not yet legally reviewed or enforced**.
 - **Not deleted:** Convex Auth's internal rate-limit rows may retain an email identifier until the provider's own cleanup. Backups and infrastructure-level copies are outside the app's control and have no documented retention yet.
 - There is no automatic expiry deletion for inactive accounts; only member-initiated deletion exists.
@@ -49,10 +54,10 @@ This document describes what the prototype stores, who can see it, and what stil
 | Processor | Role | Data |
 | --- | --- | --- |
 | Convex | Database, functions, auth session storage | All application data above |
-| Freebuff integrations gateway | Sends the email OTP | Email address and six-digit code |
+| Freebuff integrations gateway | Sends the email OTP and opt-in transactional notifications | Email address, six-digit code, and the notification subject/body for opted-in members |
 | `@zumer/snapdom` | Generates the memory card **in the browser** | No network transfer; image is downloaded locally |
 
-No analytics, advertising, CRM, AI provider or payment processor is connected. There are no cookies for tracking; Convex Auth uses its own session mechanism.
+No analytics, advertising, CRM, AI provider or payment processor is connected. Transactional notification email is opt-in and sent only for events the member is already part of. There are no cookies for tracking; Convex Auth uses its own session mechanism.
 
 Vendor DPAs, hosting regions and subprocessors have **not** been reviewed. This must happen before any public pilot.
 
@@ -85,6 +90,7 @@ Primary sources to check: MeitY, the Gazette of India, PIB, and India Code. Do n
 - Anonymous guest accounts are refused by every product function unless `ALLOW_GUEST_DEMO=true`. They are not treated as verified members; production requires email OTP.
 - No service-role key, database password or provider secret exists in client code.
 - Convex environment variables (email gateway key) are read server-side only.
+- Notification feeds are scoped to the signed-in recipient. Email is opt-in, queued server-side, re-checks consent/account status at delivery, and skips demo profiles, guests and deleted/disabled accounts.
 - Input lengths, enum values, future dates, capacity and status transitions are validated server-side.
 
 ### Known security gaps
@@ -92,7 +98,7 @@ Primary sources to check: MeitY, the Gazette of India, PIB, and India Code. Do n
 - Query-level discovery throttling is not implemented; Convex queries cannot write rate-limit counters. Platform-level abuse controls and monitoring are still required.
 - The app-level throttles are fixed-window counters, not a distributed WAF or bot-detection system. There is no CAPTCHA, device attestation or IP reputation.
 - No CSRF-specific analysis (Convex RPC uses authenticated websockets; still needs review).
-- No independent penetration test, dependency audit, secret scanning or CI pipeline yet. `convex-test` authorization tests exist, but they are not a penetration test.
+- No independent penetration test, dependency audit or secret scanning yet. A GitHub Actions workflow now runs typecheck/lint/tests, but it has not been executed and contains no security scanners. `convex-test` authorization tests exist, but they are not a penetration test.
 - No automated content moderation for free-text fields beyond length limits and report review.
 - No age or identity verification. Email OTP proves control of an inbox, not a person or age.
 - No staffed moderation team, appeal process, grievance officer or emergency response.

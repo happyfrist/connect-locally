@@ -1,11 +1,11 @@
 # Multi-user test report
 
-**Date:** 30 October 2026  
+**Date:** 7 November 2026  
 **Environment:** local Freebuff workspace, development Convex deployment (`pastel-husky-806`)  
 **Test harness:** `convex-test` 0.0.66 + Vitest 5.0.5, edge-runtime environment  
 **Schema:** real `src/convex/schema.ts`, real public/internal functions  
 **Command:** `bun run test:backend`  
-**Result:** **14 passed, 0 failed** (one earlier deletion failure was found and fixed)
+**Result:** **20 passed, 0 failed** (an earlier deletion defect and a test assertion issue were found and corrected)
 
 This is backend integration testing, not browser E2E. It proves that separate authenticated identities acting through the real Convex functions see the correct state and are refused where they should be. It does not prove visual layout, browser session persistence or real-world operations.
 
@@ -39,6 +39,12 @@ Each test creates its own fresh database and accounts through `t.run` + `t.withI
 | 12 | Export privacy | Export contains the member's own yes but not the other member's `maybe` decision | Pass |
 | 13 | Deletion | Sessions, refresh tokens, provider account and verification codes are gone immediately; product records and profile are removed by the resumable worker; report is retained; tombstone has no email/role; re-onboarding is refused | Pass after fix |
 | 14 | Host attendance | Hosting is not treated as proof of attendance; a non-checked-in host cannot be a reconnect target and cannot submit a reconnect answer | Pass |
+| 15 | In-app notifications + opt-in | A join request always creates a host notification; email stays absent until the host explicitly enables it; a later event queues exactly one email | Pass |
+| 16 | Real email endpoint | The queued action posts to `https://integrations.vly.ai/v1/email/send` with the bearer key, host recipient, subject and plan content; the outbox moves to `sent` | Pass with mocked provider response |
+| 17 | Decision integrity | Approval writes a requester notification and queued email; approval after the plan starts is refused | Pass |
+| 18 | Notification deletion | Repeated events dedupe to one feed row and one email job; the resumable deletion worker removes both | Pass |
+| 19 | Gateway rejection | An HTTP 200 response with `success:false` / `status:"failed"` is recorded as `failed` with a bounded error, not `sent` | Pass |
+| 20 | Delivery-time opt-out | A queued email is skipped and `fetch` is not called when the member turns email off before delivery | Pass |
 
 ## Defects found by these tests
 
@@ -49,6 +55,9 @@ Each test creates its own fresh database and accounts through `t.run` + `t.withI
 5. **Hidden hosts' plans remained readable by direct ID.** Central visibility now hides the plan for non-owners.
 6. **Hosting implicitly counted as attendance.** The reconnection path allowed a host to skip check-in. Hosts now use the same window; the UI and backend both require a real attendance record.
 7. **Scheduled functions and generated types required a Convex upgrade.** Upgraded `convex` 1.42.1 → 1.48.0; deploy and typecheck pass.
+8. **Hosts could approve or decline after the plan had started.** Added a server-side start guard and a regression test.
+9. **The onboarding review screen promised demo content even when the deployment flag was off.** The promise and seed call are now conditional on `appConfig.demoSeedEnabled`.
+10. **A test used `toMatchObject` for an absent optional field.** Convex omits absent fields; the assertion now checks the value directly. This was a test bug, not a product regression.
 
 ## Explicit limitations
 
@@ -58,3 +67,5 @@ Each test creates its own fresh database and accounts through `t.run` + `t.withI
 - No moderation queue UI interaction test, report-to-appeal journey test or deletion-under-load test.
 - No screenshots, axe-core, Lighthouse or Playwright evidence exists.
 - The demo-mode integration test intentionally runs with the flag absent; the development deployment has it enabled for the walkthrough.
+- Transactional email uses a mocked `fetch` response. No live provider delivery, bounce handling or inbox rendering was tested.
+- The GitHub Actions workflow has not run because this host cannot push or trigger workflows.

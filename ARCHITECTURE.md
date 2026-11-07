@@ -8,7 +8,7 @@ A modular monolith: one Vite/React client and one Convex deployment. There is no
 src/
   pages/                 route-level screens (UI composition only)
   components/
-    AppShell.tsx         nav, profile gate, derived notifications
+    AppShell.tsx         nav, profile gate, in-app notification feed
     product/             shared product UI (cards, report dialog, primitives)
     ui/                  shadcn/ui primitives
   convex/
@@ -26,6 +26,7 @@ src/
     journal.ts           private journal, stats, computed milestones
     safety.ts            blocking, reports, reporter view
     moderation.ts        owner-only roles, queue, decisions, audit log
+    notifications.ts     in-app feed, read state, queued email delivery action
     config.ts            public deployment capability flags
     seed.ts              opt-in idempotent demo city
 ```
@@ -47,7 +48,7 @@ The domain model and permission rules translate directly to Postgres + RLS if a 
 | Table | Purpose | Notable constraints |
 | --- | --- | --- |
 | `users` | Convex Auth identity + `role` (`admin`/`moderator`/`member`) + `accountStatus` | email indexed by auth; never returned to other members; deleted rows are unidentified tombstones |
-| `profiles` | Public-facing member profile and preferences | `by_user` unique in practice; `isDemo`, `hidden` |
+| `profiles` | Public-facing member profile and preferences | `by_user` unique in practice; `isDemo`, `hidden`, opt-in `notifyByEmail` |
 | `activities` | Hosted plans and open invitations | `status`, `startsAt`, `maxParticipants`, `autoApprove` (demo only), `isDemo` |
 | `joinRequests` | Join intent + host decision | `by_activity_user`; one row per member per plan |
 | `attendance` | Honest self/host check-in | `isDemo` marks sample history |
@@ -63,6 +64,8 @@ The domain model and permission rules translate directly to Postgres + RLS if a 
 | `auditLog` | Moderator/owner actions | append-only through functions; optional actor for system procedures |
 | `rateLimits` | Fixed-window mutation throttles | one bucket per action/member/window |
 | `accountDeletions` | Resumable erasure jobs | indexed by member/status; tombstone retained |
+| `notifications` | In-app event feed and read state | per-member index; dedupe key per event/recipient |
+| `emailOutbox` | Transactional email queue + delivery result | opt-in only; per-recipient index; no email address duplicated in the row |
 | `demoSeed` | Idempotency markers | content per city, history per member |
 
 All timestamps are stored as epoch milliseconds. No table stores exact coordinates, phone numbers, messages or identity documents. There is intentionally no direct-message table yet.
@@ -76,7 +79,7 @@ Every product function starts with `requireProfile(ctx)` (an active, non-anonymo
 | Read a plan | Signed in, not blocked with the host. Venue and area are public by design. |
 | Read participant names | Signed in and not blocked with those members. Only approved participants; no contact details. |
 | Request to join | Not the host, plan open, not started, capacity available, no existing pending/approved/declined request, not blocked with host. |
-| Approve/decline | Host of that plan only; request must be pending; approval re-checks capacity transactionally. |
+| Approve/decline | Host of that plan only; request must be pending; plan must not have started; approval re-checks capacity transactionally. |
 | Withdraw | Request owner only. |
 | Post update / cancel | Host only. Cancelling declines pending requests and sets a reason. |
 | Check in | Host or approved participant; from 30 minutes before start to 24 hours after scheduled end; cancelled plans rejected. Creates one journal entry, idempotently. |
@@ -121,8 +124,13 @@ Weights are a product hypothesis, not a scientific claim. Change them in one fil
 5. **No public moderator bootstrap.** Roles are granted only with the internal `moderation.grantRole` owner procedure; disabling an account uses `moderation.setAccountStatus` and revokes sessions.
 6. **No verification claims.** The 18+ gate is self-declared and the UI says so. No identity provider is integrated.
 7. **Public venues only.** The data model has `venue` + `area`, not coordinates or addresses.
+8. **Updates are transactional.** Join requests, decisions, cancellations, plan updates, circle decisions, report outcomes and mutual connections write an in-app notification inside the same mutation. Email is queued only for members who explicitly opted in; provider delivery happens in a scheduled action and a failure is recorded, never reported as success.
 
-## 6. Demo data
+## 6. Notifications
+
+`src/convex/lib/notify.ts` owns the notification and email templates. `notifications.mine` returns a bounded feed; `markRead`/`markAllRead` are member-scoped. Emails are written to `emailOutbox` and claimed once by `notifications.sendEmailJob`. The action calls the real gateway at `/v1/email/send` with `VLY_INTEGRATION_KEY`; it does not send to demo profiles, anonymous guests, disabled/deleting/deleted accounts, or members who turned email off after the job was queued. `APP_BASE_URL` is optional: without it, the email omits the deep link rather than inventing a domain. Account deletion removes both the feed and queued email as part of the resumable worker.
+
+## 7. Demo data
 
 `seed.seedDemoCity` is idempotent via `demoSeed` markers and returns `enabled: false` unless `ALLOW_DEMO_SEED=true`. Guest access likewise requires `ALLOW_GUEST_DEMO=true`; both default to off in production.
 
@@ -133,16 +141,16 @@ Demo hosts have `autoApprove: true` so the join → approval journey works witho
 
 Seeded demo accounts cannot sign in: they have no credentials.
 
-## 7. Runtime and scale
+## 8. Runtime and scale
 
 Queries cap lists (30 plans, 12 people, 40 posts, 100 reports, 30 audit rows) and use indexes for the primary access paths. Some per-row follow-up queries (counts, profiles) are intentionally simple; they are fine at prototype scale and would be denormalised or cursor-paginated before a city pilot. Convex reactivity means approvals, capacity and reconnect results update without polling.
 
-## 8. Verification status
+## 9. Verification status
 
 - `bunx convex dev --once` — schema and functions deploy successfully to the development deployment.
 - `bunx tsc -b --noEmit` — passes.
 - `bun run test` — 14 unit tests (matching + policy windows/gates).
-- `bun run test:backend` — 14 `convex-test` integration tests with independent identities, covering moderator provisioning, disable, visibility, blocks, attendance (including no host bypass), mutual reconnection, abuse throttles, demo/guest gates, export privacy and resumable deletion.
+- `bun run test:backend` — 20 `convex-test` integration tests with independent identities, covering moderator provisioning, disable, visibility, blocks, attendance (including no host bypass), mutual reconnection, abuse throttles, demo/guest gates, in-app + opt-in email notifications, delivery-time opt-out, the real gateway payload and rejection path, approval-after-start, export privacy and resumable deletion.
 - `bun run lint` — 0 errors; remaining warnings are Fast Refresh hints in shadcn/generated files.
 - No browser E2E, load test, device matrix, accessibility audit or independent penetration test exists. No live deployed review URL was supplied.
 

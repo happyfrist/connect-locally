@@ -109,6 +109,7 @@ export default function Onboarding() {
 function OnboardingForm({ me, isEditing }: { me: Me; isEditing: boolean }) {
   const complete = useMutation(api.profiles.completeOnboarding);
   const seed = useMutation(api.seed.seedDemoCity);
+  const config = useQuery(api.config.appConfig);
   const navigate = useNavigate();
 
   const [step, setStep] = useState(0);
@@ -164,7 +165,7 @@ function OnboardingForm({ me, isEditing }: { me: Me; isEditing: boolean }) {
         bio: form.bio.trim(),
         confirmedAdult: true,
       });
-      if (!profile) {
+      if (!profile && config?.demoSeedEnabled) {
         setSeeding(true);
         try {
           await seed({});
@@ -583,12 +584,12 @@ function OnboardingForm({ me, isEditing }: { me: Me; isEditing: boolean }) {
                 </div>
               </div>
 
-              {!profile ? (
+              {!profile && config?.demoSeedEnabled ? (
                 <div className="mt-5 flex items-start gap-3 rounded-xl bg-secondary/60 p-4 text-xs leading-5 text-secondary-foreground">
                   <Sparkles className="mt-0.5 size-4 shrink-0" />
-                  After you join we'll add a small, clearly labelled demo city so
-                  you can try the full journey immediately. Demo members are marked
-                  as demo everywhere.
+                  This demonstration deployment adds a small, clearly labelled demo
+                  city so you can try the full journey immediately. Demo members are
+                  marked as demo everywhere.
                 </div>
               ) : null}
             </div>
