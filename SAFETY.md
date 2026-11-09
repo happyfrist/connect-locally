@@ -14,17 +14,17 @@ Connectmaxxing coordinates strangers meeting in physical locations. That is the 
 - Hosts approve or decline each person; capacity is enforced transactionally.
 - A member can withdraw without giving a reason.
 - Beginner-friendly and small-group filters make lower-pressure plans easy to find.
-- Blocks are enforced server-side in discovery, person suggestions, plan detail, join requests and circles.
+- Blocks are enforced server-side in discovery, person suggestions, plan detail, join requests and circles. Blocking withdraws requests between the pair and removes memberships in each other's circles.
 
 ### During and after a plan
 
 - Self check-in is available from 30 minutes before the start until 24 hours after the scheduled end, only for approved participants and the host. Cancelled plans cannot record attendance.
-- Hosts can post updates, cancel with a reason, and see who is coming. Hosts check in like everyone else before they can reconnect.
+- Hosts can post updates, cancel with a reason before the plan starts, and see who is coming. Hosts check in like everyone else before they can reconnect.
 - Participants receive an in-app update for approvals, decisions, plan changes, cancellations and mutual connections. Email is opt-in and transactional only; there are no marketing or re-engagement emails.
 - Reconnection opens only after the plan has ended, is available for 14 days, and is never available for a cancelled plan.
 - After checking in, each attendee can privately answer *yes / maybe / no* about seeing each other person again.
 - A **connection requires two independent yes answers**. A one-sided answer is never returned to the other person; a "maybe" is never surfaced.
-- Blocking deletes pending private answers between both people and ends any existing connection.
+- Blocking deletes pending private answers between both people, ends any existing connection, withdraws requests between the pair and removes memberships in each other's circles.
 - Journal entries are private. Participation numbers are never shown as a trust score.
 
 ### Reporting and moderation
@@ -32,7 +32,7 @@ Connectmaxxing coordinates strangers meeting in physical locations. That is the 
 - Plans, circles and members can be reported from their own pages with a reason and a free-text description.
 - Reports are visible only to the reporter (status) and to a role-restricted moderator queue (details).
 - Duplicate open reports on the same target by the same reporter are collapsed.
-- Moderators can mark a report reviewing/resolved/dismissed, warn, cancel a plan, restrict a circle to request-only, or disable the responsible account (which also revokes its sessions). Every decision is written to `auditLog` with the moderator's user id.
+- Moderators can mark a report reviewing/resolved/dismissed, warn the subject in-app, remove a plan (declining pending requests and notifying affected members), restrict a circle to request-only, or disable the responsible account (which also revokes its sessions). Only an admin can restrict another moderator/admin account. Every decision is written to `auditLog` with the moderator's user id.
 - A report's internal note is never shown to the reporter or the reported member. The reporter gets an in-app outcome notification when a report is resolved or dismissed.
 - Moderator roles cannot be claimed from the public app. The deployment owner grants them through a trusted internal procedure.
 

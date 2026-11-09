@@ -26,6 +26,63 @@ export const block = mutation({
       createdAt: Date.now(),
     });
 
+    // A blocked pair must not keep occupying each other's plan or circle
+    // capacity invisibly. Withdraw requests between their own plans and remove
+    // memberships in each other's circles.
+    const [myJoinRequests, theirJoinRequests] = await Promise.all([
+      ctx.db
+        .query("joinRequests")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .collect(),
+      ctx.db
+        .query("joinRequests")
+        .withIndex("by_user", (q) => q.eq("userId", args.userId))
+        .collect(),
+    ]);
+    for (const request of myJoinRequests) {
+      const activity = await ctx.db.get(request.activityId);
+      if (
+        activity?.hostId === args.userId &&
+        (request.status === "pending" || request.status === "approved")
+      ) {
+        await ctx.db.patch(request._id, {
+          status: "withdrawn",
+          decidedAt: Date.now(),
+        });
+      }
+    }
+    for (const request of theirJoinRequests) {
+      const activity = await ctx.db.get(request.activityId);
+      if (
+        activity?.hostId === userId &&
+        (request.status === "pending" || request.status === "approved")
+      ) {
+        await ctx.db.patch(request._id, {
+          status: "withdrawn",
+          decidedAt: Date.now(),
+        });
+      }
+    }
+
+    const [myMemberships, theirMemberships] = await Promise.all([
+      ctx.db
+        .query("circleMembers")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .collect(),
+      ctx.db
+        .query("circleMembers")
+        .withIndex("by_user", (q) => q.eq("userId", args.userId))
+        .collect(),
+    ]);
+    for (const membership of myMemberships) {
+      const circle = await ctx.db.get(membership.circleId);
+      if (circle?.hostId === args.userId) await ctx.db.delete(membership._id);
+    }
+    for (const membership of theirMemberships) {
+      const circle = await ctx.db.get(membership.circleId);
+      if (circle?.hostId === userId) await ctx.db.delete(membership._id);
+    }
+
     // Existing one-sided reconnect “yes” answers must not be able to create a
     // connection later, so pending decisions between the pair are removed.
     const [mine, theirs] = await Promise.all([

@@ -79,8 +79,11 @@ export default function Safety() {
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = "connectmaxxing-my-data.json";
+    document.body.appendChild(anchor);
     anchor.click();
-    URL.revokeObjectURL(url);
+    anchor.remove();
+    // Revoking immediately can cancel a download in some browsers.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
     toast.success("Export downloaded.");
   };
 
@@ -269,8 +272,9 @@ export default function Safety() {
               onCheckedChange={(checked) => void toggleEmail(checked)}
               disabled={
                 savingEmail ||
-                !me?.emailAvailable ||
-                config?.emailNotificationsAvailable === false
+                (!me?.emailNotificationsEnabled &&
+                  (!me?.emailAvailable ||
+                    config?.emailNotificationsAvailable === false))
               }
               aria-label="Enable transactional email updates"
             />

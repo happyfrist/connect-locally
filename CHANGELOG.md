@@ -41,9 +41,23 @@
 - Account deletion removes in-app notifications and queued email as part of the resumable worker.
 - Added a GitHub Actions verification workflow (typecheck, lint, tests), made generated Convex bindings trackable and ignored local `.env*` files so credentials are not added to a future commit.
 
+### Functional audit fixes
+
+- Made plan capacity count the host inside `maxParticipants` everywhere, matching the “Maximum people” UI; the host plus approved guests now fills a plan.
+- Added same-city enforcement to plan requests, circle joins and attaching a plan to a circle; direct IDs cannot bypass the city-scoped UI.
+- Refused approval of a hidden, disabled or deleted applicant, and refused plan cancellation after start.
+- Blocking now withdraws existing join requests between the pair and removes memberships in each other's circles, so blocked rows cannot consume capacity invisibly. Direct block actions were added to people suggestions and circle host cards.
+- Added the missing “Withdraw request” action for pending circle memberships.
+- Moderation “warn” now sends an in-app warning; removing a plan cancels/declines requests and notifies the host and affected members; removing a circle restricts it and notifies the host. Moderators cannot restrict another moderator/admin.
+- Moderator status is safe to query before onboarding, and the badge counts open plus reviewing reports.
+- Data export now includes authored updates, circle posts, notifications, queued email and outgoing blocks.
+- A repeated deletion request resumes a stalled deletion job instead of returning success without scheduling work.
+- Fixed a demo-seeding race when onboarding submitted before config loaded; the adult confirmation is now sent from the actual form value; added a language-step validation message.
+- Added an OTP gateway timeout, direct block actions and safer export download handling.
+
 ### Testing and tooling
 
-- Added `convex-test` + Vitest backend integration tests with independent identities (20 tests), including delivery-time email opt-out, the gateway payload/rejection path and approval-after-start guard.
+- Added `convex-test` + Vitest backend integration tests with independent identities (31 tests), including delivery-time email opt-out, the gateway payload/rejection path, host-inclusive capacity, city scope, circle membership/discussion, journal, complete export and resumable deletion.
 - Added pure policy tests for check-in/reconnect windows, rate buckets and demo/guest gating (7 tests).
 - Upgraded `convex` to 1.48.0 for the test harness.
 - Fixed all ESLint errors across the repository; remaining warnings are Fast Refresh hints in generated/shadcn files.

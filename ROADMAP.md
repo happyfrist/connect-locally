@@ -61,4 +61,4 @@ These are launch blockers, not stretch goals.
 - No payments or ticketing.
 - No identity or age verification.
 - No admin web app separate from the member app; moderation is a role-restricted route in the same client.
-- Backend integration tests (18) now cover the highest-risk authorization, notification and lifecycle paths, but there is no browser E2E suite, load test or real-device matrix. A GitHub Actions workflow exists in the workspace but has not been run on GitHub from this host.
+- Backend integration tests (31) now cover the highest-risk authorization, notification, capacity, circle, journal, export and lifecycle paths, but there is no browser E2E suite, load test or real-device matrix. A GitHub Actions workflow exists in the workspace but has not been run on GitHub from this host.

@@ -220,7 +220,17 @@ export const deleteMyData = mutation({
       .query("accountDeletions")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique();
-    if (existing && existing.status !== "complete") return { started: true };
+    if (existing) {
+      if (existing.status === "complete") {
+        throw new Error("This account has already been deleted.");
+      }
+      // A repeated request resumes a stalled job instead of leaving the
+      // account stuck in "deleting" forever. continueDeletion is idempotent.
+      await ctx.scheduler.runAfter(0, internal.profiles.continueDeletion, {
+        jobId: existing._id,
+      });
+      return { started: true, resumed: true };
+    }
 
     // Revoke access before scheduling any cleanup. A current access JWT may
     // still be cryptographically valid, but every product function checks the
@@ -518,17 +528,35 @@ export const exportMyData = query({
       throw new Error("This account is being deleted and its data is no longer exported.");
     }
     const profile = await getMyProfile(ctx);
-    const [requests, attendance, decisions, connectionsA, connectionsB, journal, memberships, reports] =
-      await Promise.all([
-        ctx.db.query("joinRequests").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
-        ctx.db.query("attendance").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
-        ctx.db.query("reconnectDecisions").withIndex("by_from", (q) => q.eq("fromUserId", userId)).collect(),
-        ctx.db.query("connections").withIndex("by_userA", (q) => q.eq("userA", userId)).collect(),
-        ctx.db.query("connections").withIndex("by_userB", (q) => q.eq("userB", userId)).collect(),
-        ctx.db.query("journalEntries").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
-        ctx.db.query("circleMembers").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
-        ctx.db.query("reports").withIndex("by_reporter", (q) => q.eq("reporterId", userId)).collect(),
-      ]);
+    const [
+      requests,
+      attendance,
+      decisions,
+      connectionsA,
+      connectionsB,
+      journal,
+      memberships,
+      reports,
+      activityUpdates,
+      circlePosts,
+      notifications,
+      emails,
+      blocksMade,
+    ] = await Promise.all([
+      ctx.db.query("joinRequests").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("attendance").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("reconnectDecisions").withIndex("by_from", (q) => q.eq("fromUserId", userId)).collect(),
+      ctx.db.query("connections").withIndex("by_userA", (q) => q.eq("userA", userId)).collect(),
+      ctx.db.query("connections").withIndex("by_userB", (q) => q.eq("userB", userId)).collect(),
+      ctx.db.query("journalEntries").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("circleMembers").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("reports").withIndex("by_reporter", (q) => q.eq("reporterId", userId)).collect(),
+      ctx.db.query("activityUpdates").withIndex("by_author", (q) => q.eq("authorId", userId)).collect(),
+      ctx.db.query("circlePosts").withIndex("by_author", (q) => q.eq("authorId", userId)).collect(),
+      ctx.db.query("notifications").withIndex("by_user_created", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("emailOutbox").withIndex("by_recipient", (q) => q.eq("recipientId", userId)).collect(),
+      ctx.db.query("blocks").withIndex("by_blocker", (q) => q.eq("blockerId", userId)).collect(),
+    ]);
     const [hostedActivities, hostedCircles] = await Promise.all([
       ctx.db.query("activities").withIndex("by_host", (q) => q.eq("hostId", userId)).collect(),
       ctx.db.query("circles").withIndex("by_host", (q) => q.eq("hostId", userId)).collect(),
@@ -547,6 +575,11 @@ export const exportMyData = query({
       journalEntries: journal,
       circleMemberships: memberships,
       reports,
+      activityUpdates,
+      circlePosts,
+      notifications,
+      emailOutbox: emails,
+      blocksMade,
       hostedActivities,
       hostedCircles,
     };

@@ -20,6 +20,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { CATEGORIES } from "@/convex/lib/catalog";
 import { useMutation, useQuery } from "convex/react";
 import {
+  Ban,
   CalendarDays,
   Compass,
   Info,
@@ -29,7 +30,7 @@ import {
   Users,
 } from "lucide-react";
 import { useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 
 type Tab = "activities" | "invitations" | "people";
@@ -51,8 +52,12 @@ export default function Discover() {
   const [beginner, setBeginner] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<Id<"users"> | null>(null);
   const [seeding, setSeeding] = useState(false);
+  const [blockingPerson, setBlockingPerson] = useState(false);
 
   const seed = useMutation(api.seed.seedDemoCity);
+  const blockMember = useMutation(api.safety.block);
+  const config = useQuery(api.config.appConfig);
+  const demoAvailable = config?.demoSeedEnabled === true;
 
   const plans = useQuery(
     api.activities.list,
@@ -97,6 +102,19 @@ export default function Discover() {
       toast.error(error instanceof Error ? error.message : "Could not load demo content.");
     } finally {
       setSeeding(false);
+    }
+  };
+
+  const blockPerson = async (targetId: Id<"users">) => {
+    setBlockingPerson(true);
+    try {
+      await blockMember({ userId: targetId });
+      setSelectedPerson(null);
+      toast.success("Blocked. You won't see each other's plans or profiles.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not block this member.");
+    } finally {
+      setBlockingPerson(false);
     }
   };
 
@@ -223,13 +241,19 @@ export default function Discover() {
               <EmptyState
                 icon={<Compass className="size-5" />}
                 title="Nothing here yet"
-                description="Try a different filter, or add the sample city to see the full journey with clearly labelled demo members."
+                description={
+                  demoAvailable
+                    ? "Try a different filter, or add the sample city to see the full journey with clearly labelled demo members."
+                    : "Try a different filter, or host the first plan yourself."
+                }
                 action={
                   <div className="flex flex-wrap justify-center gap-2">
-                    <Button onClick={loadDemo} disabled={seeding} className="gap-2">
-                      {seeding ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-                      Add sample city
-                    </Button>
+                    {demoAvailable ? (
+                      <Button onClick={loadDemo} disabled={seeding} className="gap-2">
+                        {seeding ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                        Add sample city
+                      </Button>
+                    ) : null}
                     <Button variant="outline" asChild>
                       <a href="/create">Host something yourself</a>
                     </Button>
@@ -277,10 +301,16 @@ export default function Discover() {
                 title="No introductions yet"
                 description="Invitations appear when there's genuine shared ground in your city. Joining a circle or hosting a plan is usually faster than waiting."
                 action={
-                  <Button onClick={loadDemo} disabled={seeding} variant="outline" className="gap-2">
-                    {seeding ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-                    Add sample city
-                  </Button>
+                  demoAvailable ? (
+                    <Button onClick={loadDemo} disabled={seeding} variant="outline" className="gap-2">
+                      {seeding ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                      Add sample city
+                    </Button>
+                  ) : (
+                    <Button variant="outline" asChild>
+                      <Link to="/create">Host the first plan</Link>
+                    </Button>
+                  )
                 }
               />
             </div>
@@ -449,6 +479,23 @@ export default function Discover() {
                   }}
                 >
                   Browse all plans
+                </Button>
+              </div>
+
+              <div className="flex justify-end border-t border-border pt-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5 text-muted-foreground"
+                  disabled={blockingPerson}
+                  onClick={() => void blockPerson(personDetail.person.userId)}
+                >
+                  {blockingPerson ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Ban className="size-3.5" />
+                  )}
+                  Block this member
                 </Button>
               </div>
             </>

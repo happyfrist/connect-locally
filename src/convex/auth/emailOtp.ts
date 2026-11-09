@@ -20,7 +20,7 @@ export const emailOtp = Email({
       await axios.post(
         freebuffEmailOtpUrl(),
         { to: email, otp: token },
-        { headers: freebuffEmailOtpHeaders() },
+        { headers: freebuffEmailOtpHeaders(), timeout: 15_000 },
       );
     } catch (error) {
       throw freebuffEmailOtpError(error);

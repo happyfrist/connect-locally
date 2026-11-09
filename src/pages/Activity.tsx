@@ -99,11 +99,18 @@ export default function Activity() {
     );
   }
 
-  const { activity, host, isHost, participants, reconnectCandidates } = detail;
+  const {
+    activity,
+    host,
+    isHost,
+    participants,
+    approvedCount,
+    spotsLeft,
+    reconnectCandidates,
+  } = detail;
   const started = activity.startsAt <= now;
   const checkIn = checkInState(activity.startsAt, activity.durationMins, now);
   const cancelled = activity.status === "cancelled";
-  const spotsLeft = activity.maxParticipants - participants.length;
 
   const doRequest = async () => {
     setBusy("join");
@@ -289,7 +296,7 @@ export default function Activity() {
                 {activity.costNote ? ` · ${activity.costNote}` : ""}
               </Detail>
               <Detail icon={<Users className="size-4" />} label="Group size">
-                {participants.length} of {activity.maxParticipants} spots filled
+                {approvedCount} of {activity.maxParticipants} spots filled
                 {spotsLeft > 0 ? ` · ${spotsLeft} left` : " · full"}
               </Detail>
               <Detail icon={<BadgeCheck className="size-4" />} label="Repeats">
@@ -378,7 +385,7 @@ export default function Activity() {
             <h2 className="font-display text-xl">
               Who's coming{" "}
               <span className="text-sm font-normal text-muted-foreground">
-                ({participants.length + 1} including the host)
+                ({approvedCount} including the host)
               </span>
             </h2>
             <p className="mt-1 text-xs text-muted-foreground">
@@ -394,7 +401,9 @@ export default function Activity() {
               ))}
               {participants.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No one else has joined yet. First-timers welcome.
+                  {approvedCount <= 1
+                    ? "No one else has joined yet. First-timers welcome."
+                    : "Other approved members aren't available to show."}
                 </p>
               ) : null}
             </div>
@@ -536,7 +545,7 @@ export default function Activity() {
                         “{request.message}”
                       </p>
                     ) : null}
-                    {request.status === "pending" ? (
+                    {request.status === "pending" && !started ? (
                       <div className="mt-3 flex gap-2">
                         <Button
                           size="sm"
@@ -556,6 +565,11 @@ export default function Activity() {
                           <X className="size-3.5" /> Decline
                         </Button>
                       </div>
+                    ) : request.status === "pending" && started ? (
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        This plan has started, so requests can no longer be
+                        decided.
+                      </p>
                     ) : null}
                   </li>
                 ))}
@@ -609,13 +623,19 @@ export default function Activity() {
                       : "The check-in window has closed."}
                   </p>
                 )}
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setCancelOpen(true)}
-                >
-                  Cancel this plan
-                </Button>
+                {started ? (
+                  <p className="rounded-lg bg-muted px-3 py-2 text-center text-[11px] text-muted-foreground">
+                    This plan has started and can no longer be cancelled.
+                  </p>
+                ) : (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => setCancelOpen(true)}
+                  >
+                    Cancel this plan
+                  </Button>
+                )}
               </div>
             ) : detail.myRequestStatus === "approved" ? (
               <div className="mt-4 space-y-2">
@@ -669,11 +689,17 @@ export default function Activity() {
               <p className="mt-4 rounded-lg bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
                 This plan has already started.
               </p>
+            ) : spotsLeft <= 0 ? (
+              <p className="mt-4 rounded-lg bg-muted px-3 py-2 text-center text-xs text-muted-foreground">
+                This plan is full.
+              </p>
             ) : (
-              <Button asChild className="mt-4 w-full gap-2">
-                <button type="button" onClick={() => setJoinOpen(true)}>
-                  <UserPlus className="size-4" /> Request to join
-                </button>
+              <Button
+                type="button"
+                className="mt-4 w-full gap-2"
+                onClick={() => setJoinOpen(true)}
+              >
+                <UserPlus className="size-4" /> Request to join
               </Button>
             )}
 

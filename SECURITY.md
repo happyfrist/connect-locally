@@ -36,11 +36,11 @@ Until a channel exists, do not deploy this code publicly.
 See [PRIVACY.md](./PRIVACY.md#5-security-controls-present) for the implemented controls and known gaps. Key points:
 
 - Every public function authenticates the caller, checks account status and loads a completed profile.
-- Moderation functions require the `moderator` or `admin` role. Roles are granted only by an internal owner procedure such as:
+- Moderation functions require the `moderator` or `admin` role. A moderator cannot restrict another moderator or admin; that requires an admin actor. Roles are granted only by an internal owner procedure such as:
   `bunx convex run moderation:grantRole '{"email":"owner@example.com","role":"moderator"}'`.
   Public clients cannot call internal functions.
 - Account disable and moderator recovery use the internal `moderation.setAccountStatus` and `moderation.grantRole` functions. Disabling revokes sessions immediately.
-- Blocks, hidden accounts, check-in windows and reconnect consent are enforced server-side, not just in the UI.
+- Blocks, hidden accounts, check-in windows, reconnect consent, same-city participation and host-inclusive capacity are enforced server-side, not just in the UI.
 - Deletion revokes auth sessions, refresh tokens, provider accounts and verification codes before scheduling resumable product-record cleanup.
 - Public profile shapes are allow-listed.
 - Demo seeding and demo consent are opt-in through `ALLOW_DEMO_SEED`; production defaults to off.
@@ -56,7 +56,7 @@ See [PRIVACY.md](./PRIVACY.md#5-security-controls-present) for the implemented c
 - Owner-only moderator grant and owner-only account disable with session revocation.
 - Disabled accounts cannot perform product mutations.
 - Hidden members and hidden hosts are absent from direct reads and discovery.
-- Blocks are symmetric across profiles, plans, circles, posts and connections.
+- Blocks are symmetric across profiles, plans, circles, posts and connections; requests between the pair are withdrawn and memberships in each other's circles are removed.
 - Check-in rejects before/after the window and on cancelled plans.
 - Reconnection requires two independent yes answers and rejects future/cancelled plans.
 - Reports are reason-allow-listed and throttled.

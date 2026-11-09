@@ -9,6 +9,7 @@ import { useMutation, useQuery } from "convex/react";
 import {
   ArrowLeft,
   ArrowUpRight,
+  Ban,
   CalendarDays,
   Check,
   Flag,
@@ -21,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 
 const KIND_LABEL: Record<string, string> = {
@@ -40,6 +41,8 @@ export default function CircleDetail() {
   const leaveCircle = useMutation(api.circles.leave);
   const decideMember = useMutation(api.circles.decideMember);
   const post = useMutation(api.circles.post);
+  const blockMember = useMutation(api.safety.block);
+  const navigate = useNavigate();
 
   const [busy, setBusy] = useState<string | null>(null);
   const [postBody, setPostBody] = useState("");
@@ -82,7 +85,11 @@ export default function CircleDetail() {
     setBusy("leave");
     try {
       await leaveCircle({ circleId: circle._id });
-      toast.success("You've left the circle. No hard feelings.");
+      toast.success(
+        isMember
+          ? "You've left the circle. No hard feelings."
+          : "Membership request withdrawn.",
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not leave.");
     } finally {
@@ -101,6 +108,20 @@ export default function CircleDetail() {
       toast.success(decision === "approved" ? "Member approved" : "Request declined");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doBlockHost = async () => {
+    if (!host) return;
+    setBusy("block");
+    try {
+      await blockMember({ userId: host.userId });
+      toast.success("Blocked. This circle is no longer visible to either of you.");
+      navigate("/circles");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not block the host.");
     } finally {
       setBusy(null);
     }
@@ -178,9 +199,22 @@ export default function CircleDetail() {
                   <Check className="size-3.5" /> You're a member
                 </span>
               ) : detail.membershipStatus === "pending" ? (
-                <span className="rounded-full bg-muted px-3 py-1.5 text-xs text-muted-foreground">
-                  Request pending
-                </span>
+                <>
+                  <span className="rounded-full bg-muted px-3 py-1.5 text-xs text-muted-foreground">
+                    Request pending
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={doLeave}
+                    disabled={busy === "leave"}
+                  >
+                    {busy === "leave" ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : null}
+                    Withdraw request
+                  </Button>
+                </>
               ) : (
                 <Button onClick={doJoin} disabled={busy === "join"} className="gap-2">
                   {busy === "join" ? <Loader2 className="size-4 animate-spin" /> : null}
@@ -364,6 +398,24 @@ export default function CircleDetail() {
               </div>
               {host.bio ? (
                 <p className="mt-3 text-xs leading-5 text-muted-foreground">{host.bio}</p>
+              ) : null}
+              {!isHost ? (
+                <div className="mt-3 flex justify-end border-t border-border pt-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="gap-1.5 text-muted-foreground"
+                    onClick={() => void doBlockHost()}
+                    disabled={busy === "block"}
+                  >
+                    {busy === "block" ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Ban className="size-3.5" />
+                    )}
+                    Block host
+                  </Button>
+                </div>
               ) : null}
             </div>
           ) : null}

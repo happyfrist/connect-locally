@@ -8,9 +8,9 @@ import {
 } from "./_generated/server";
 import {
   deleteAuthIdentity,
+  getCurrentUserId,
   isModerator,
   requireModerator,
-  requireProfile,
   revokeAuthSessions,
   writeAudit,
 } from "./lib/auth";
@@ -20,17 +20,27 @@ import { reportStatusValidator } from "./schema";
 export const status = query({
   args: {},
   handler: async (ctx) => {
-    const { userId } = await requireProfile(ctx);
-    const moderator = await isModerator(ctx, userId);
-    const open = moderator
-      ? await ctx.db
+    // AppShell calls this before onboarding. It must be safe for a signed-in
+    // member with no profile, or for a disabled/deleting account.
+    const userId = await getCurrentUserId(ctx);
+    const moderator = userId ? await isModerator(ctx, userId) : false;
+    let openReports = 0;
+    if (moderator) {
+      const [open, reviewing] = await Promise.all([
+        ctx.db
           .query("reports")
           .withIndex("by_status", (q) => q.eq("status", "open"))
-          .take(100)
-      : [];
+          .take(100),
+        ctx.db
+          .query("reports")
+          .withIndex("by_status", (q) => q.eq("status", "reviewing"))
+          .take(100),
+      ]);
+      openReports = open.length + reviewing.length;
+    }
     return {
       isModerator: moderator,
-      openReports: open.length,
+      openReports,
     };
   },
 });
@@ -85,6 +95,9 @@ export const setAccountStatus = internalMutation({
       .withIndex("email", (q) => q.eq("email", email))
       .unique();
     if (!user) throw new Error("No signed-up account uses that email.");
+    if (user.accountStatus === "deleting" || user.accountStatus === "deleted") {
+      throw new Error("A deleting or deleted account cannot be re-enabled.");
+    }
     await ctx.db.patch(user._id, { accountStatus: args.status });
     if (args.status === "disabled") await revokeAuthSessions(ctx, user._id);
     await writeAudit(
@@ -251,6 +264,17 @@ export const resolve = mutation({
       subjectId = circle?.hostId ?? null;
     }
 
+    if (args.action === "warning" && subjectId) {
+      await notifyUser(ctx, {
+        recipientId: subjectId,
+        kind: "moderation_warning",
+        title: "Moderation warning",
+        body: "A moderator reviewed a report connected to your account and issued a warning. Review the community rules in the Safety centre.",
+        href: "/safety",
+        dedupeKey: `warning:${report._id}:${subjectId}`,
+      });
+    }
+
     if (args.action === "content_removed") {
       if (report.targetType === "activity") {
         const activity = await ctx.db.get(report.targetId as Id<"activities">);
@@ -259,16 +283,63 @@ export const resolve = mutation({
             status: "cancelled",
             cancelReason: "Removed after a moderation review.",
           });
+          const requests = await ctx.db
+            .query("joinRequests")
+            .withIndex("by_activity", (q) => q.eq("activityId", activity._id))
+            .collect();
+          const recipients = new Set<Id<"users">>();
+          for (const request of requests) {
+            if (request.status === "pending") {
+              await ctx.db.patch(request._id, {
+                status: "declined",
+                decidedAt: Date.now(),
+              });
+            }
+            if (
+              request.status === "pending" || request.status === "approved"
+            ) {
+              recipients.add(request.userId);
+            }
+          }
+          // The host also needs to know that their plan was removed.
+          recipients.add(activity.hostId);
+          for (const recipientId of recipients) {
+            await notifyUser(ctx, {
+              recipientId,
+              kind: "plan_removed",
+              title: "Plan removed",
+              body: `A moderator removed ${activity.title} after a review.`,
+              href: `/activity/${activity._id}`,
+              dedupeKey: `moderation-remove:${report._id}:${recipientId}`,
+            });
+          }
         }
       } else if (report.targetType === "circle") {
         const circle = await ctx.db.get(report.targetId as Id<"circles">);
         if (circle) {
           await ctx.db.patch(circle._id, { joinPolicy: "request" });
+          await notifyUser(ctx, {
+            recipientId: circle.hostId,
+            kind: "circle_restricted",
+            title: "Circle restricted",
+            body: `A moderator restricted ${circle.name} after a review. New members now need host approval.`,
+            href: `/circles/${circle._id}`,
+            dedupeKey: `moderation-circle:${report._id}:${circle.hostId}`,
+          });
         }
       }
     }
 
     if (args.action === "member_restricted" && subjectId) {
+      const subject = await ctx.db.get(subjectId);
+      if (subject?.role === "admin" || subject?.role === "moderator") {
+        const actor = await ctx.db.get(moderatorId);
+        if (actor?.role !== "admin") {
+          throw new Error(
+            "Only an admin can restrict another moderator or admin account.",
+          );
+        }
+      }
       await ctx.db.patch(subjectId, { accountStatus: "disabled" });
       await revokeAuthSessions(ctx, subjectId);
       await writeAudit(

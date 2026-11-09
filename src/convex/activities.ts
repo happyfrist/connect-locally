@@ -44,6 +44,11 @@ async function approvedRequests(ctx: ReadCtx, activityId: Id<"activities">) {
     .collect();
 }
 
+/** maxParticipants is the whole group, including the host. */
+function guestCapacity(maxParticipants: number) {
+  return Math.max(0, maxParticipants - 1);
+}
+
 export const list = query({
   args: {
     category: v.optional(v.string()),
@@ -108,8 +113,11 @@ export const list = query({
       const host = await profileFor(ctx, userId, activity.hostId);
       if (!host) continue;
       const requests = await approvedRequests(ctx, activity._id);
-      const approvedCount = requests.filter((r) => r.status === "approved").length;
-      if (approvedCount >= activity.maxParticipants) continue;
+      const approvedGuestCount = requests.filter(
+        (request) => request.status === "approved",
+      ).length;
+      const spotsLeft = guestCapacity(activity.maxParticipants) - approvedGuestCount;
+      if (spotsLeft <= 0) continue;
 
       rows.push({
         activity: {
@@ -133,8 +141,9 @@ export const list = query({
           circleId: activity.circleId,
         },
         host,
-        approvedCount,
-        spotsLeft: activity.maxParticipants - approvedCount,
+        // Total group size, including the host.
+        approvedCount: approvedGuestCount + 1,
+        spotsLeft,
         myStatus: activity.hostId === userId ? "host" : (requestByActivity.get(activity._id) ?? "none"),
         attended: attended.has(activity._id),
       });
@@ -179,10 +188,12 @@ export const get = query({
       ),
     );
 
-    const participantIds = requests
+    const approvedGuestIds = requests
       .filter((request) => request.status === "approved")
-      .map((request) => request.userId)
-      .filter((id) => !blocked.has(id as string));
+      .map((request) => request.userId);
+    const participantIds = approvedGuestIds.filter(
+      (id) => !blocked.has(id as string),
+    );
 
     const participants = [];
     for (const id of participantIds.slice(0, 30)) {
@@ -240,6 +251,11 @@ export const get = query({
         ? { _id: circle._id, name: circle.name, kind: circle.kind }
         : null,
       participants,
+      approvedCount: approvedGuestIds.length + 1,
+      spotsLeft: Math.max(
+        0,
+        guestCapacity(activity.maxParticipants) - approvedGuestIds.length,
+      ),
       isHost,
       myRequestStatus: isHost ? "host" : (myRequest?.status ?? "none"),
       myRequestMessage: myRequest?.message ?? null,
@@ -349,6 +365,9 @@ export const create = mutation({
     if (args.circleId) {
       const circle = await ctx.db.get(args.circleId);
       if (!circle) throw new Error("That circle no longer exists.");
+      if (circle.city !== profile.city) {
+        throw new Error("That circle is outside your city.");
+      }
       const membership = await ctx.db
         .query("circleMembers")
         .withIndex("by_circle_user", (q) =>
@@ -418,8 +437,10 @@ export const update = mutation({
     const approved = (await approvedRequests(ctx, activity._id)).filter(
       (request) => request.status === "approved",
     );
-    if (args.maxParticipants < approved.length) {
-      throw new Error("You can't reduce capacity below the people already joining.");
+    if (args.maxParticipants < approved.length + 1) {
+      throw new Error(
+        "You can't reduce capacity below the host and the people already joining.",
+      );
     }
     await ctx.db.patch(args.activityId, {
       title: clean.title,
@@ -449,6 +470,9 @@ export const requestJoin = mutation({
     if (!activity) throw new Error("That plan no longer exists.");
     if (activity.status !== "open") throw new Error("This plan has been cancelled.");
     if (activity.hostId === userId) throw new Error("You're hosting this plan.");
+    if (activity.city !== profile.city) {
+      throw new Error("This plan is outside your city.");
+    }
     if (activity.startsAt < Date.now()) throw new Error("This plan has already started.");
     if (await isBlockedPair(ctx, userId, activity.hostId)) {
       throw new Error("This plan isn't available to you.");
@@ -473,10 +497,10 @@ export const requestJoin = mutation({
       }
     }
 
-    const approvedCount = (await approvedRequests(ctx, activity._id)).filter(
+    const approvedGuestCount = (await approvedRequests(ctx, activity._id)).filter(
       (request) => request.status === "approved",
     ).length;
-    if (approvedCount >= activity.maxParticipants) {
+    if (approvedGuestCount >= guestCapacity(activity.maxParticipants)) {
       throw new Error("This plan is full.");
     }
 
@@ -538,12 +562,16 @@ export const decideRequest = mutation({
     if (await isBlockedPair(ctx, userId, request.userId)) {
       throw new Error("That request is no longer available.");
     }
+    // A hidden, disabled or deleted member must not be approved into a plan.
+    if (!(await getVisibleProfile(ctx, userId, request.userId))) {
+      throw new Error("That request is no longer available.");
+    }
 
     if (args.decision === "approved") {
-      const approvedCount = (await approvedRequests(ctx, activity._id)).filter(
+      const approvedGuestCount = (await approvedRequests(ctx, activity._id)).filter(
         (row) => row.status === "approved",
       ).length;
-      if (approvedCount >= activity.maxParticipants) {
+      if (approvedGuestCount >= guestCapacity(activity.maxParticipants)) {
         throw new Error("This plan is already full.");
       }
     }
@@ -591,6 +619,9 @@ export const cancel = mutation({
     if (!activity) throw new Error("That plan no longer exists.");
     if (activity.hostId !== userId) throw new Error("Only the host can cancel this plan.");
     if (activity.status === "cancelled") return;
+    if (activity.startsAt <= Date.now()) {
+      throw new Error("A plan can't be cancelled after it has started.");
+    }
 
     const reason = args.reason?.trim().slice(0, 500) || "The host cancelled this plan.";
     await ctx.db.patch(args.activityId, {
@@ -770,9 +801,12 @@ export const myPlans = query({
       return {
         activity,
         host: await profileFor(ctx, userId, activity.hostId),
-        approvedCount: approvedRows.length,
+        approvedCount: approvedRows.length + 1,
         pendingCount: rows.filter((row) => row.status === "pending").length,
-        spotsLeft: activity.maxParticipants - approvedRows.length,
+        spotsLeft: Math.max(
+          0,
+          guestCapacity(activity.maxParticipants) - approvedRows.length,
+        ),
         myStatus: "host" as const,
         attended: attendanceRows.some(
           (row) => row.activityId === activity._id,
@@ -787,9 +821,12 @@ export const myPlans = query({
       return {
         activity,
         host: await profileFor(ctx, userId, activity.hostId),
-        approvedCount: approvedRows.length,
+        approvedCount: approvedRows.length + 1,
         pendingCount: 0,
-        spotsLeft: activity.maxParticipants - approvedRows.length,
+        spotsLeft: Math.max(
+          0,
+          guestCapacity(activity.maxParticipants) - approvedRows.length,
+        ),
         myStatus: request?.status ?? "none",
         attended: attendanceRows.some((row) => row.activityId === activity._id),
       };

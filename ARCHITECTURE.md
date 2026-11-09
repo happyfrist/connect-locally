@@ -78,25 +78,25 @@ Every product function starts with `requireProfile(ctx)` (an active, non-anonymo
 | --- | --- |
 | Read a plan | Signed in, not blocked with the host. Venue and area are public by design. |
 | Read participant names | Signed in and not blocked with those members. Only approved participants; no contact details. |
-| Request to join | Not the host, plan open, not started, capacity available, no existing pending/approved/declined request, not blocked with host. |
-| Approve/decline | Host of that plan only; request must be pending; plan must not have started; approval re-checks capacity transactionally. |
+| Request to join | Not the host, same city, plan open, not started, capacity available (the host counts toward `maxParticipants`), no existing pending/approved/declined request, not blocked with host. |
+| Approve/decline | Host of that plan only; request must be pending; requester must still be visible/active; plan must not have started; approval re-checks capacity transactionally. |
 | Withdraw | Request owner only. |
-| Post update / cancel | Host only. Cancelling declines pending requests and sets a reason. |
+| Post update / cancel | Host only. Cancelling declines pending requests and sets a reason; cancellation after start is refused. |
 | Check in | Host or approved participant; from 30 minutes before start to 24 hours after scheduled end; cancelled plans rejected. Creates one journal entry, idempotently. |
 | Read reconnect candidates | Only after the plan ends and only if the viewer checked in; candidates are the host plus checked-in attendees, filtered by block/visibility. |
 | Submit reconnect decision | Plan must have ended within 14 days and not be cancelled; both parties must be attendees; blocked pairs rejected; answer upserted privately. |
 | Create connection | Only inside `reconnect.decide` when both directions are `yes`. Never through a public mutation. |
 | Connections list | Only rows where the caller is `userA` or `userB`, with blocks filtered. |
 | Circle read | Signed in; host visible and not blocked. Discussion posts, members and pending members are filtered by block/hidden/account status; posts/pending only for approved members/host. |
-| Circle join | Capacity and block checks; `open` approves immediately, `request` creates a pending membership. |
-| Circle approve | Host only, pending row only, capacity re-checked. |
+| Circle join | Same-city, capacity and block checks; `open` approves immediately, `request` creates a pending membership. |
+| Circle approve | Host only, pending row only, requester still visible/active, capacity re-checked. |
 | Circle post | Approved member; announcements host-only. |
 | Report | Active member; target existence validated; reason allow-listed; throttled; duplicates with an open report collapsed. |
 | Moderator queue/resolve | `role === "moderator"` or `"admin"`; owner-only provisioning; decisions write `auditLog`. |
 | Data export | Caller's own rows only; other people's private answers are never included. |
 | Data deletion | Synchronous auth revocation, then resumable batched removal of the caller's rows, hosted content and decisions about them; moderation reports/audit retained. |
 
-Blocks are checked in discovery, people suggestions, plan detail, join requests, circle listing/joining, reconnect and connection listings. Because blocked users can call functions directly with known IDs, the checks live inside the functions, not only in the UI. A single `getVisibleProfile` helper is the source of truth for hidden/blocked/active-account visibility.
+Blocks are checked in discovery, people suggestions, plan detail, join requests, circle listing/joining, reconnect and connection listings. Because blocked users can call functions directly with known IDs, the checks live inside the functions, not only in the UI. A single `getVisibleProfile` helper is the source of truth for hidden/blocked/active-account visibility. Blocking also withdraws existing requests between the pair and removes memberships in each other's circles so hidden rows cannot keep consuming capacity.
 
 ## 4. Matching
 
@@ -150,7 +150,7 @@ Queries cap lists (30 plans, 12 people, 40 posts, 100 reports, 30 audit rows) an
 - `bunx convex dev --once` — schema and functions deploy successfully to the development deployment.
 - `bunx tsc -b --noEmit` — passes.
 - `bun run test` — 14 unit tests (matching + policy windows/gates).
-- `bun run test:backend` — 20 `convex-test` integration tests with independent identities, covering moderator provisioning, disable, visibility, blocks, attendance (including no host bypass), mutual reconnection, abuse throttles, demo/guest gates, in-app + opt-in email notifications, delivery-time opt-out, the real gateway payload and rejection path, approval-after-start, export privacy and resumable deletion.
+- `bun run test:backend` — 31 `convex-test` integration tests with independent identities, covering moderator provisioning, pre-onboarding status, disable, visibility, blocking cleanup, attendance (including no host bypass), mutual reconnection, abuse throttles, demo/guest gates, in-app + opt-in email notifications, delivery-time opt-out, the real gateway payload and rejection path, approval-after-start, host-inclusive capacity, city scope, circle membership/discussion, journal, export privacy and resumable deletion. The suite also covers moderator warnings/removals and the admin-restriction guard.
 - `bun run lint` — 0 errors; remaining warnings are Fast Refresh hints in shadcn/generated files.
 - No browser E2E, load test, device matrix, accessibility audit or independent penetration test exists. No live deployed review URL was supplied.
 

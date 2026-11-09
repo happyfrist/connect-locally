@@ -254,6 +254,9 @@ export const join = mutation({
     await enforceRateLimit(ctx, userId, "circle:join", 20, 24 * 60 * 60_000);
     const circle = await ctx.db.get(args.circleId);
     if (!circle) throw new Error("That circle no longer exists.");
+    if (circle.city !== profile.city) {
+      throw new Error("This circle is outside your city.");
+    }
     if (await isBlockedPair(ctx, userId, circle.hostId)) {
       throw new Error("This circle isn't available to you.");
     }
@@ -315,6 +318,9 @@ export const decideMember = mutation({
     }
     if (membership.status !== "pending") throw new Error("Already handled.");
     if (await isBlockedPair(ctx, userId, membership.userId)) {
+      throw new Error("That membership request is no longer available.");
+    }
+    if (!(await getVisibleProfile(ctx, userId, membership.userId))) {
       throw new Error("That membership request is no longer available.");
     }
     if (args.decision === "declined") {

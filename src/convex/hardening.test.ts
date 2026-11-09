@@ -65,6 +65,7 @@ async function makeActivity(
     status?: "open" | "cancelled";
     title?: string;
     city?: string;
+    maxParticipants?: number;
   } = {},
 ) {
   return (await t.run(async (ctx) => {
@@ -80,7 +81,7 @@ async function makeActivity(
       startsAt: opts.startsAt ?? Date.now() + 24 * 60 * 60_000,
       durationMins: opts.durationMins ?? 60,
       cost: 0,
-      maxParticipants: 8,
+      maxParticipants: opts.maxParticipants ?? 8,
       beginnerFriendly: true,
       recurrence: "once",
       status: opts.status ?? "open",
@@ -112,6 +113,11 @@ async function makeCircle(
   t: T,
   hostId: Id<"users">,
   members: Id<"users">[],
+  opts: {
+    joinPolicy?: "open" | "request";
+    city?: string;
+    maxMembers?: number;
+  } = {},
 ) {
   const circleId = (await t.run(async (ctx) => {
     const id = await ctx.db.insert("circles", {
@@ -119,12 +125,12 @@ async function makeCircle(
       description: "A public test circle with no private data.",
       category: "social",
       kind: "community",
-      city: CITY,
+      city: opts.city ?? CITY,
       area: "Indiranagar",
       hostId,
       cadence: "Weekly",
-      joinPolicy: "open",
-      maxMembers: 20,
+      joinPolicy: opts.joinPolicy ?? "open",
+      maxMembers: opts.maxMembers ?? 20,
       isDemo: false,
       createdAt: Date.now(),
     });
@@ -176,6 +182,25 @@ describe("administrator access", () => {
     await expect(as(t, member).query(api.moderation.queue, {})).rejects.toThrow(
       /Moderator access/,
     );
+  });
+
+  it("reports moderator status safely before onboarding", async () => {
+    const t = convexTest(schema, modules);
+    const pendingOnboarding = await t.run(async (ctx) =>
+      ctx.db.insert("users", {
+        name: "New member",
+        email: "new-member@example.test",
+        role: "member",
+        isAnonymous: false,
+      }),
+    );
+
+    await expect(
+      as(t, pendingOnboarding).query(api.moderation.status, {}),
+    ).resolves.toEqual({ isModerator: false, openReports: 0 });
+    await expect(
+      as(t, pendingOnboarding).query(api.moderation.queue, {}),
+    ).rejects.toThrow(/Moderator access/);
   });
 
   it("revokes sessions when an owner disables an account", async () => {
@@ -321,7 +346,9 @@ describe("blocking", () => {
     const b = await makeUser(t, "B", "block-b@example.test");
     const c = await makeUser(t, "C", "block-c@example.test");
     const activityId = await makeActivity(t, b);
+    const hostedCircleId = await makeCircle(t, b, [a]);
     const circleId = await makeCircle(t, c, [a, b]);
+    await as(t, a).mutation(api.activities.requestJoin, { activityId });
 
     await t.run(async (ctx) => {
       const [userA, userB] = [a, b].sort();
@@ -368,6 +395,25 @@ describe("blocking", () => {
       ctx.db.query("reconnectDecisions").collect(),
     );
     expect(decisions).toHaveLength(0);
+
+    const withdrawn = await t.run(async (ctx) =>
+      ctx.db
+        .query("joinRequests")
+        .withIndex("by_activity_user", (q) =>
+          q.eq("activityId", activityId).eq("userId", a),
+        )
+        .unique(),
+    );
+    expect(withdrawn?.status).toBe("withdrawn");
+    const blockedMembership = await t.run(async (ctx) =>
+      ctx.db
+        .query("circleMembers")
+        .withIndex("by_circle_user", (q) =>
+          q.eq("circleId", hostedCircleId).eq("userId", a),
+        )
+        .unique(),
+    );
+    expect(blockedMembership).toBeNull();
   });
 });
 
@@ -411,6 +457,50 @@ describe("attendance and mutual reconnection", () => {
     await expect(
       as(t, guest).mutation(api.activities.markAttendance, { activityId: open }),
     ).resolves.toBeDefined();
+  });
+
+  it("creates a private journal entry on check-in and keeps reflections editable", async () => {
+    const t = convexTest(schema, modules);
+    const host = await makeUser(t, "Host", "journal-host@example.test");
+    const guest = await makeUser(t, "Guest", "journal-guest@example.test");
+    const activityId = await makeActivity(t, host, {
+      startsAt: Date.now() + 30 * 60_000,
+      durationMins: 60,
+    });
+    await as(t, guest).mutation(api.activities.requestJoin, { activityId });
+    const request = await t.run(async (ctx) =>
+      ctx.db
+        .query("joinRequests")
+        .withIndex("by_activity_user", (q) =>
+          q.eq("activityId", activityId).eq("userId", guest),
+        )
+        .unique(),
+    );
+    if (!request) throw new Error("Expected a join request.");
+    await as(t, host).mutation(api.activities.decideRequest, {
+      requestId: request._id,
+      decision: "approved",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(activityId, { startsAt: Date.now() - 10 * 60_000 });
+    });
+    await as(t, guest).mutation(api.activities.markAttendance, { activityId });
+
+    const journal = await as(t, guest).query(api.journal.mine, {});
+    expect(journal.entries).toHaveLength(1);
+    expect(journal.stats.activities).toBe(1);
+    const entryId = journal.entries[0]._id;
+    await as(t, guest).mutation(api.journal.addReflection, {
+      entryId,
+      reflection: "A good walk with new people.",
+    });
+    const reflected = await as(t, guest).query(api.journal.mine, {});
+    expect(reflected.entries[0].reflection).toBe("A good walk with new people.");
+
+    await as(t, guest).mutation(api.journal.removeEntry, { entryId });
+    const removed = await as(t, guest).query(api.journal.mine, {});
+    expect(removed.entries).toEqual([]);
+    expect(removed.stats.activities).toBe(1);
   });
 
   it("creates a connection only after two independent yes answers", async () => {
@@ -508,6 +598,255 @@ describe("attendance and mutual reconnection", () => {
   });
 });
 
+describe("plan capacity and request integrity", () => {
+  it("counts the host inside maxParticipants and refuses over-capacity joins", async () => {
+    const t = convexTest(schema, modules);
+    const host = await makeUser(t, "Host", "capacity-host@example.test");
+    const first = await makeUser(t, "First", "capacity-first@example.test");
+    const second = await makeUser(t, "Second", "capacity-second@example.test");
+    const activityId = await makeActivity(t, host, { maxParticipants: 2 });
+
+    await as(t, first).mutation(api.activities.requestJoin, { activityId });
+    const request = await t.run(async (ctx) =>
+      ctx.db
+        .query("joinRequests")
+        .withIndex("by_activity_user", (q) =>
+          q.eq("activityId", activityId).eq("userId", first),
+        )
+        .unique(),
+    );
+    if (!request) throw new Error("Expected a join request.");
+    await as(t, host).mutation(api.activities.decideRequest, {
+      requestId: request._id,
+      decision: "approved",
+    });
+
+    await expect(
+      as(t, second).mutation(api.activities.requestJoin, { activityId }),
+    ).rejects.toThrow(/full/);
+    await expect(
+      as(t, host).query(api.activities.get, { activityId }),
+    ).resolves.toMatchObject({ approvedCount: 2, spotsLeft: 0 });
+  });
+
+  it("refuses cancellation after a plan has started", async () => {
+    const t = convexTest(schema, modules);
+    const host = await makeUser(t, "Host", "late-cancel-host@example.test");
+    const activityId = await makeActivity(t, host, {
+      startsAt: Date.now() - 60 * 60_000,
+    });
+    await expect(
+      as(t, host).mutation(api.activities.cancel, { activityId }),
+    ).rejects.toThrow(/after it has started/);
+  });
+
+  it("keeps plan requests and circle joins inside the member's city", async () => {
+    const t = convexTest(schema, modules);
+    const host = await makeUser(t, "Host", "city-host@example.test");
+    const guest = await makeUser(t, "Guest", "city-guest@example.test");
+    const activityId = await makeActivity(t, host, { city: "Mumbai" });
+    await expect(
+      as(t, guest).mutation(api.activities.requestJoin, { activityId }),
+    ).rejects.toThrow(/outside your city/);
+
+    const circleId = await t.run(async (ctx) => {
+      const id = await ctx.db.insert("circles", {
+        name: "Mumbai circle",
+        description: "A public test circle in another city.",
+        category: "social",
+        kind: "community",
+        city: "Mumbai",
+        area: "Bandra",
+        hostId: host,
+        cadence: "Weekly",
+        joinPolicy: "open",
+        maxMembers: 20,
+        isDemo: false,
+        createdAt: Date.now(),
+      });
+      await ctx.db.insert("circleMembers", {
+        circleId: id,
+        userId: host,
+        role: "host",
+        status: "approved",
+        joinedAt: Date.now(),
+      });
+      return id;
+    });
+    await expect(
+      as(t, guest).mutation(api.circles.join, { circleId }),
+    ).rejects.toThrow(/outside your city/);
+  });
+
+  it("runs the request-only circle membership and discussion flow", async () => {
+    const t = convexTest(schema, modules);
+    const host = await makeUser(t, "Host", "circle-host@example.test");
+    const member = await makeUser(t, "Member", "circle-member@example.test");
+    const outsider = await makeUser(t, "Outsider", "circle-outsider@example.test");
+    const circleId = await makeCircle(t, host, [], { joinPolicy: "request" });
+
+    await expect(
+      as(t, member).mutation(api.circles.join, { circleId }),
+    ).resolves.toBe("pending");
+    const hostView = await as(t, host).query(api.circles.get, { circleId });
+    expect(hostView?.pendingMembers.map((row) => row.person?.userId)).toContain(member);
+    const requestId = hostView?.pendingMembers[0].requestId;
+    if (!requestId) throw new Error("Expected a pending membership.");
+
+    await as(t, host).mutation(api.circles.decideMember, {
+      circleId,
+      requestId,
+      decision: "approved",
+    });
+    await as(t, member).mutation(api.circles.post, {
+      circleId,
+      body: "I can bring the extra chairs.",
+      kind: "discussion",
+    });
+    const memberView = await as(t, member).query(api.circles.get, { circleId });
+    expect(memberView?.posts[0].body).toBe("I can bring the extra chairs.");
+
+    const outsiderView = await as(t, outsider).query(api.circles.get, { circleId });
+    expect(outsiderView?.posts).toEqual([]);
+    await expect(
+      as(t, outsider).mutation(api.circles.post, {
+        circleId,
+        body: "This should not be allowed.",
+        kind: "discussion",
+      }),
+    ).rejects.toThrow(/Join the circle/);
+
+    await as(t, member).mutation(api.circles.leave, { circleId });
+    const afterLeave = await as(t, member).query(api.circles.get, { circleId });
+    expect(afterLeave?.membershipStatus).toBe("none");
+    expect(afterLeave?.posts).toEqual([]);
+  });
+
+  it("refuses to approve a request from a disabled account", async () => {
+    const t = convexTest(schema, modules);
+    const email = "approval-disabled@example.test";
+    const host = await makeUser(t, "Host", "approval-host@example.test");
+    const guest = await makeUser(t, "Guest", email);
+    const activityId = await makeActivity(t, host);
+    await as(t, guest).mutation(api.activities.requestJoin, { activityId });
+    const request = await t.run(async (ctx) =>
+      ctx.db
+        .query("joinRequests")
+        .withIndex("by_activity_user", (q) =>
+          q.eq("activityId", activityId).eq("userId", guest),
+        )
+        .unique(),
+    );
+    if (!request) throw new Error("Expected a join request.");
+
+    await t.mutation(internal.moderation.setAccountStatus, {
+      email,
+      status: "disabled",
+      reason: "Test disabled applicant",
+    });
+    await expect(
+      as(t, host).mutation(api.activities.decideRequest, {
+        requestId: request._id,
+        decision: "approved",
+      }),
+    ).rejects.toThrow(/no longer available/);
+  });
+});
+
+describe("moderation actions", () => {
+  it("makes warnings and content removal visible to affected members", async () => {
+    const t = convexTest(schema, modules);
+    const moderatorEmail = "moderator@example.test";
+    const moderator = await makeUser(t, "Moderator", moderatorEmail);
+    await t.mutation(internal.moderation.grantRole, {
+      email: moderatorEmail,
+      role: "moderator",
+    });
+    const reporter = await makeUser(t, "Reporter", "mod-reporter@example.test");
+    const host = await makeUser(t, "Host", "mod-host@example.test");
+    const guest = await makeUser(t, "Guest", "mod-guest@example.test");
+    const activityId = await makeActivity(t, host, { title: "Reported walk" });
+    await as(t, guest).mutation(api.activities.requestJoin, { activityId });
+
+    const report = await as(t, reporter).mutation(api.safety.report, {
+      targetType: "activity",
+      targetId: activityId,
+      reason: "Harassment or unwanted contact",
+      details: "This plan needs a moderator review for the test.",
+    });
+    if (report.alreadyReported) throw new Error("Expected a new report.");
+
+    await as(t, moderator).mutation(api.moderation.resolve, {
+      reportId: report.reportId,
+      status: "resolved",
+      resolution: "Warning issued in test.",
+      action: "warning",
+    });
+    let state = await t.run(async (ctx) => ({
+      notifications: await ctx.db.query("notifications").collect(),
+      requests: await ctx.db.query("joinRequests").collect(),
+    }));
+    expect(
+      state.notifications.some(
+        (row) => row.userId === host && row.kind === "moderation_warning",
+      ),
+    ).toBe(true);
+    expect(state.requests[0].status).toBe("pending");
+
+    await as(t, moderator).mutation(api.moderation.resolve, {
+      reportId: report.reportId,
+      status: "resolved",
+      resolution: "Plan removed in test.",
+      action: "content_removed",
+    });
+    state = await t.run(async (ctx) => ({
+      notifications: await ctx.db.query("notifications").collect(),
+      requests: await ctx.db.query("joinRequests").collect(),
+    }));
+    expect(state.requests[0].status).toBe("declined");
+    expect(
+      state.notifications.filter((row) => row.kind === "plan_removed").map((row) => row.userId),
+    ).toEqual(expect.arrayContaining([host, guest]));
+  });
+
+  it("does not let a moderator restrict an admin account", async () => {
+    const t = convexTest(schema, modules);
+    const moderatorEmail = "moderator-guard@example.test";
+    await makeUser(t, "Moderator", moderatorEmail);
+    await t.mutation(internal.moderation.grantRole, {
+      email: moderatorEmail,
+      role: "moderator",
+    });
+    const moderator = await t.run(async (ctx) =>
+      ctx.db
+        .query("users")
+        .withIndex("email", (q) => q.eq("email", moderatorEmail))
+        .unique(),
+    );
+    const admin = await makeUser(t, "Admin", "admin-target@example.test", {
+      role: "admin",
+    });
+    const reporter = await makeUser(t, "Reporter", "admin-report@example.test");
+    if (!moderator) throw new Error("Expected the moderator account.");
+
+    const report = await as(t, reporter).mutation(api.safety.report, {
+      targetType: "member",
+      targetId: admin,
+      reason: "Harassment or unwanted contact",
+      details: "A test report about an administrator account.",
+    });
+    if (report.alreadyReported) throw new Error("Expected a new report.");
+    await expect(
+      as(t, moderator._id).mutation(api.moderation.resolve, {
+        reportId: report.reportId,
+        status: "resolved",
+        resolution: "Attempted restriction in test.",
+        action: "member_restricted",
+      }),
+    ).rejects.toThrow(/Only an admin/);
+  });
+});
+
 describe("notifications and request integrity", () => {
   it("always creates an in-app update but emails only after explicit opt-in", async () => {
     const t = convexTest(schema, modules);
@@ -564,6 +903,36 @@ describe("notifications and request integrity", () => {
     });
     expect(state.outbox[0].subject).toContain("New join request");
     expect(state.outbox[0].html).toContain("Second public walk");
+  });
+
+  it("marks one or all in-app updates as read", async () => {
+    const t = convexTest(schema, modules);
+    const host = await makeUser(t, "Host", "read-host@example.test");
+    const guest = await makeUser(t, "Guest", "read-guest@example.test");
+    const first = await makeActivity(t, host);
+    await as(t, guest).mutation(api.activities.requestJoin, { activityId: first });
+
+    const feed = await as(t, host).query(api.notifications.mine, {});
+    expect(feed.unread).toBe(1);
+    await as(t, host).mutation(api.notifications.markRead, {
+      notificationId: feed.rows[0]._id,
+    });
+    await expect(
+      as(t, host).query(api.notifications.mine, {}),
+    ).resolves.toMatchObject({ unread: 0 });
+
+    const second = await makeActivity(t, host, {
+      title: "Another public walk",
+      startsAt: Date.now() + 48 * 60 * 60_000,
+    });
+    await as(t, guest).mutation(api.activities.requestJoin, { activityId: second });
+    await expect(
+      as(t, host).query(api.notifications.mine, {}),
+    ).resolves.toMatchObject({ unread: 1 });
+    await as(t, host).mutation(api.notifications.markAllRead, {});
+    await expect(
+      as(t, host).query(api.notifications.mine, {}),
+    ).resolves.toMatchObject({ unread: 0 });
   });
 
   it("deduplicates repeated request events and removes queued email on deletion", async () => {
@@ -821,6 +1190,62 @@ describe("personal data export", () => {
     });
     expect(JSON.stringify(exported)).not.toContain('"decision":"maybe"');
   });
+
+  it("includes authored posts, updates, notifications and queued email", async () => {
+    const t = convexTest(schema, modules);
+    const a = await makeUser(t, "A", "export-complete-a@example.test");
+    const b = await makeUser(t, "B", "export-complete-b@example.test");
+    const activityId = await makeActivity(t, a);
+    const circleId = await makeCircle(t, a, [b]);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("activityUpdates", {
+        activityId,
+        authorId: a,
+        body: "Bring water for the walk.",
+        createdAt: Date.now(),
+      });
+      await ctx.db.insert("circlePosts", {
+        circleId,
+        authorId: a,
+        body: "The circle meets on Saturday.",
+        kind: "announcement",
+        createdAt: Date.now(),
+      });
+      await ctx.db.insert("notifications", {
+        userId: a,
+        kind: "test",
+        title: "Test notification",
+        body: "Export this row.",
+        dedupeKey: "export-complete-notification",
+        createdAt: Date.now(),
+      });
+      await ctx.db.insert("emailOutbox", {
+        recipientId: a,
+        kind: "test",
+        dedupeKey: "export-complete-email",
+        subject: "Test email",
+        html: "<p>Test</p>",
+        text: "Test",
+        status: "sent",
+        attempts: 1,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      await ctx.db.insert("blocks", {
+        blockerId: a,
+        blockedId: b,
+        createdAt: Date.now(),
+      });
+    });
+
+    const exported = await as(t, a).query(api.profiles.exportMyData, {});
+    expect(exported.activityUpdates).toHaveLength(1);
+    expect(exported.activityUpdates[0].body).toBe("Bring water for the walk.");
+    expect(exported.circlePosts).toHaveLength(1);
+    expect(exported.notifications).toHaveLength(1);
+    expect(exported.emailOutbox).toHaveLength(1);
+    expect(exported.blocksMade).toHaveLength(1);
+  });
 });
 
 describe("account deletion", () => {
@@ -869,6 +1294,11 @@ describe("account deletion", () => {
       await expect(
         as(t, a).mutation(api.profiles.deleteMyData, {}),
       ).resolves.toEqual({ started: true });
+      // A repeated request resumes the existing job instead of returning a
+      // success that schedules nothing.
+      await expect(
+        as(t, a).mutation(api.profiles.deleteMyData, {}),
+      ).resolves.toEqual({ started: true, resumed: true });
 
       // Access is revoked synchronously.
       await expect(as(t, a).query(api.profiles.me, {})).resolves.toMatchObject({

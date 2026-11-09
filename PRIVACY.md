@@ -33,9 +33,9 @@ This document describes what the prototype stores, who can see it, and what stil
 
 ## 2. User controls
 
-- **Export:** Safety centre → *Export my data* downloads a JSON file containing the profile, requests, attendance, reconnect answers, connections, journal, circle memberships and reports made by the member.
-- **Delete:** Safety centre → *Delete my data* immediately revokes every Convex Auth session and provider identity, then removes the profile, hosted plans/circles and their participant rows, requests, attendance, private answers, connections, blocks, memberships and journal entries in bounded resumable batches. The member row becomes a tombstone with no email, image or role.
-- **Block/unblock:** from a plan or the safety centre. Blocking also ends an existing connection.
+- **Export:** Safety centre → *Export my data* downloads a JSON file containing the profile, requests, attendance, reconnect answers, connections, journal, circle memberships, reports, authored plan updates and circle posts, in-app notifications, queued/sent notification email and outgoing blocks.
+- **Delete:** Safety centre → *Delete my data* immediately revokes every Convex Auth session and provider identity, then removes the profile, hosted plans/circles and their participant rows, requests, attendance, private answers, connections, blocks, memberships, journal entries, notifications and queued email in bounded resumable batches. A repeated request resumes a stalled job. The member row becomes a tombstone with no email, image or role.
+- **Block/unblock:** from a plan, a person suggestion, a circle host card or the safety centre. Blocking also ends an existing connection, withdraws requests between the pair and removes memberships in each other's circles.
 - **Journal:** edit or delete any entry.
 - **Profile:** edit all profile fields from the shell.
 - **Email updates:** opt in or out from the Safety centre. In-app notifications remain enabled; email is not used for marketing or re-engagement.
@@ -46,7 +46,7 @@ This document describes what the prototype stores, who can see it, and what stil
 - Product records, in-app notifications and queued email are removed by a scheduled, indexed, resumable job in small batches, so a large history does not need to fit in one database transaction. The job is idempotent and revokes auth again on each run.
 - **Already-sent email cannot be recalled.** A message delivered before deletion remains in the recipient's inbox and the email provider's systems. Queued messages that have not been claimed are deleted or skipped.
 - **Retained:** moderation reports and the moderator audit log. These are kept as an unidentified safety record with the tombstone user id, not an email. Deleting them would destroy evidence needed for safety, legal or appeal processes. The retention period is **not yet legally reviewed or enforced**.
-- **Not deleted:** Convex Auth's internal rate-limit rows may retain an email identifier until the provider's own cleanup. Backups and infrastructure-level copies are outside the app's control and have no documented retention yet.
+- **Not deleted:** application fixed-window rate-limit counters and Convex Auth's internal rate-limit rows may retain an account/window or email identifier until cleanup; application counters do not yet have an expiry job. Backups and infrastructure-level copies are outside the app's control and have no documented retention yet.
 - There is no automatic expiry deletion for inactive accounts; only member-initiated deletion exists.
 
 ## 3. Vendors and data flow
@@ -81,7 +81,7 @@ Primary sources to check: MeitY, the Gazette of India, PIB, and India Code. Do n
 - Authorization is enforced in Convex functions, not only in the UI.
 - One shared visibility policy hides blocked, hidden, disabled, deleting and deleted members across profiles, discovery, plans, circles and connections.
 - Public profile shapes are explicit allow-lists; email and moderation fields are never returned to other members.
-- Blocked pairs are rejected in every relevant function, including direct ID calls. Blocking ends a connection and deletes pending reconnect answers.
+- Blocked pairs are rejected in every relevant function, including direct ID calls. Blocking ends a connection, deletes pending reconnect answers, withdraws requests between the pair and removes memberships in each other's circles.
 - Check-in is limited to approved participants/hosts and a narrow window (30 minutes before start to 24 hours after the scheduled end). Reconnection is available only after a plan ends, for 14 days, and never for a cancelled plan.
 - Reports cannot be read by the reported member. Reasons are allow-listed, duplicates collapsed, and submissions throttled.
 - Mutations for profile writes, plans, joins, circles, reports, reconnection, check-in and moderator decisions have fixed-window rate limits.

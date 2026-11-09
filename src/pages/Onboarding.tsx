@@ -148,7 +148,13 @@ function OnboardingForm({ me, isEditing }: { me: Me; isEditing: boolean }) {
 
   const stepValid = (() => {
     if (step === 0) return form.displayName.trim().length >= 2 && adult;
-    if (step === 1) return form.city.trim().length > 1 && form.area.trim().length > 0;
+    if (step === 1) {
+      return (
+        form.city.trim().length > 1 &&
+        form.area.trim().length > 0 &&
+        form.languages.length > 0
+      );
+    }
     if (step === 2) return form.interests.length > 0;
     if (step === 3) return form.availability.length > 0 && form.activities.length > 0;
     return true;
@@ -163,9 +169,11 @@ function OnboardingForm({ me, isEditing }: { me: Me; isEditing: boolean }) {
         city: form.city.trim(),
         area: form.area.trim(),
         bio: form.bio.trim(),
-        confirmedAdult: true,
+        confirmedAdult: adult,
       });
-      if (!profile && config?.demoSeedEnabled) {
+      // Call the server gate directly. Waiting for config here used to skip
+      // seeding if the member submitted before the config query resolved.
+      if (!profile) {
         setSeeding(true);
         try {
           await seed({});
@@ -628,7 +636,7 @@ function OnboardingForm({ me, isEditing }: { me: Me; isEditing: boolean }) {
               {step === 0
                 ? "Add a display name and confirm you're 18+."
                 : step === 1
-                  ? "Add your city and area."
+                  ? "Add your city, area and at least one language."
                   : step === 2
                     ? "Pick at least one interest."
                     : "Pick at least one activity and one time slot."}

@@ -391,8 +391,8 @@ export default function Landing() {
                 </h2>
               </div>
               <p className="max-w-xs text-sm leading-6 text-muted-foreground">
-                Messaging exists to coordinate a plan — not to become the plan.
-                It is deliberately limited.
+                Coordination happens through host updates and circle discussions —
+                there is no general inbox to live inside.
               </p>
             </div>
 

@@ -66,7 +66,7 @@ function Notifications() {
   // time reads (and render must stay pure).
   const [now] = useState(() => Date.now());
 
-  const soon = (plans?.upcoming ?? []).filter(
+  const soon = [...(plans?.upcoming ?? []), ...(plans?.hosting ?? [])].filter(
     (row) => row.activity.startsAt > now && row.activity.startsAt < now + 48 * 3600_000,
   );
   const rows = feed?.rows ?? [];
